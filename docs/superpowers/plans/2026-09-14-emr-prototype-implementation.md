@@ -357,7 +357,7 @@ git commit -m "chore: scaffold backend (FastAPI) and frontend (React/Vite) monor
 - Consumes: `app` from Task 1 (`backend/app/main.py`)
 - Produces: `get_settings()` → `Settings` (has `.database_url`); `get_db()` FastAPI dependency yielding a SQLAlchemy `Session`; `Base` declarative base (used by all models from Task 3 onward)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `backend/tests/test_db_connection.py`
 ```python
@@ -371,12 +371,14 @@ def test_can_connect_to_database():
         assert result.scalar() == 1
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && pytest tests/test_db_connection.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.core.db'`
 
-- [ ] **Step 3: Implement config and DB engine**
+> Actual: `ModuleNotFoundError: No module named 'app.core'` (same failure class).
+
+- [x] **Step 3: Implement config and DB engine**
 
 `backend/app/core/__init__.py`
 ```python
@@ -430,7 +432,7 @@ DATABASE_URL=postgresql+psycopg2://emr:emr@db:5432/emr
 JWT_SECRET=dev-secret-change-me
 ```
 
-- [ ] **Step 4: Add docker-compose so a real Postgres is available**
+- [x] **Step 4: Add docker-compose so a real Postgres is available**
 
 `docker-compose.yml`
 ```yaml
@@ -489,13 +491,15 @@ COPY . .
 CMD ["npm", "run", "dev", "--", "--host"]
 ```
 
-- [ ] **Step 5: Start Postgres and run the test**
+- [x] **Step 5: Start Postgres and run the test**
 
 Run: `docker compose up -d db && cp backend/.env.example backend/.env` then edit `backend/.env` to use `localhost` instead of `db` for local (non-container) test runs, then:
 Run: `cd backend && pytest tests/test_db_connection.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Add a DB-backed health check**
+> Actual: 1 passed.
+
+- [x] **Step 6: Add a DB-backed health check**
 
 Modify `backend/app/main.py`:
 ```python
@@ -519,17 +523,21 @@ def health_db(db: Session = Depends(get_db)):
     return {"status": "ok", "database": "connected"}
 ```
 
-- [ ] **Step 7: Manual verification**
+- [x] **Step 7: Manual verification**
 
 Run: `docker compose up -d db backend` then `curl http://localhost:8000/health/db`
 Expected: `{"status":"ok","database":"connected"}`
 
-- [ ] **Step 8: Commit**
+> Actual, with a real gap found and fixed: the first attempt returned HTTP 500 (`OperationalError: connection to server at "localhost" ... Connection refused`) because `docker-compose.yml`'s `backend` service loads the same `backend/.env` that Step 5 deliberately points at `localhost` (for host-side pytest) — but inside the container, `localhost` is the container itself, not the `db` service. Fixed by adding an `environment: DATABASE_URL: postgresql+psycopg2://emr:emr@db:5432/emr` override on the `backend` service in `docker-compose.yml` (env_file still supplies `JWT_SECRET`). After the fix: `{"status":"ok","database":"connected"}`, HTTP 200.
+
+- [x] **Step 8: Commit**
 
 ```bash
 git add docker-compose.yml backend/app/core backend/Dockerfile frontend/Dockerfile backend/.env.example backend/tests/test_db_connection.py backend/app/main.py
 git commit -m "feat: connect FastAPI to PostgreSQL via docker-compose"
 ```
+
+> Actual commit: `2ef087e`.
 
 ---
 
