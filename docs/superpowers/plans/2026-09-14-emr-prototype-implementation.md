@@ -174,7 +174,7 @@ EMR-System/
 - Produces: `GET /health` → `{"status": "ok"}` (used by Task 2's DB health check, extended not replaced)
 - Produces: FastAPI app instance `app` in `backend/app/main.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `backend/tests/test_health.py`
 ```python
@@ -190,12 +190,14 @@ def test_health_returns_ok():
     assert response.json() == {"status": "ok"}
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && pytest tests/test_health.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app'` (app package doesn't exist yet)
 
-- [ ] **Step 3: Create backend scaffold**
+> Actual result: `ModuleNotFoundError: No module named 'app.main'` (pytest/fastapi had to be installed into a fresh venv first, since this machine had no prior Python — see "남아 있는 문제" in the Task 1 report). Same failure class, expected reason.
+
+- [x] **Step 3: Create backend scaffold**
 
 `backend/requirements.txt`
 ```
@@ -231,12 +233,14 @@ def health():
 ```python
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && pip install -r requirements.txt && pytest tests/test_health.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Create frontend scaffold**
+> Actual: ran inside a venv (`backend/.venv`) created for this project; 1 passed.
+
+- [x] **Step 5: Create frontend scaffold**
 
 `frontend/package.json`
 ```json
@@ -320,17 +324,21 @@ dist/
 .env
 ```
 
-- [ ] **Step 6: Manual verification of frontend scaffold**
+- [x] **Step 6: Manual verification of frontend scaffold**
 
 Run: `cd frontend && npm install && npm run dev`
 Expected: Vite dev server starts on `http://localhost:5173` and the browser shows "EMR Prototype"
 
-- [ ] **Step 7: Commit**
+> Actual: verified headlessly (no browser in this session) — started `npm run dev` in the background and `curl`'d `http://localhost:5173/`, confirming the served HTML has `<title>EMR Prototype</title>` and loads `/src/App.tsx` through Vite's module pipeline. Server was stopped after verification.
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend frontend .gitignore
 git commit -m "chore: scaffold backend (FastAPI) and frontend (React/Vite) monorepo"
 ```
+
+> Actual commit: `ade0abb`.
 
 ---
 
