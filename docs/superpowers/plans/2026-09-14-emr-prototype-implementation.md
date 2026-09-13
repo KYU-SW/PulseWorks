@@ -21,6 +21,41 @@
 - 진료과별 화면은 컴포넌트를 복제하지 않고 공통 위젯 렌더러 + `department_config.json` 설정으로 구성한다 (요건 12).
 - 모든 PHI 조회/생성/수정과 AI 요약 생성·승인·반려는 `AuditLog`에 append-only로 기록한다 (요건 5).
 - FHIR 실제 구현(Bundle 내보내기)은 선택 기능이며 6종 매핑(Patient/Encounter/Observation/Condition/AllergyIntolerance/MedicationRequest)에 한정한다.
+- `ADMIN_STAFF`(원무과)와 `SYSTEM_ADMIN`(관리자)은 **기본적으로 환자의 임상기록 본문에 접근할 수 없다.** `ADMIN_STAFF`의 권한 범위는 접수·예약·기본 행정정보, `SYSTEM_ADMIN`의 권한 범위는 계정·역할·시스템 설정 관리이며, 이 역할이라는 이유만으로 `can_access_patient`가 `True`가 되어서는 안 된다 (Task 5).
+- API 키·비밀키는 코드나 Git에 포함하지 않는다. `backend/.env`는 `.gitignore`에 포함하고, 커밋되는 것은 `backend/.env.example`(placeholder 값)뿐이다.
+
+## 실행 환경 안내
+
+이 문서의 `Run:` 명령은 POSIX 셸(Bash) 문법(`&&`, `cp` 등)으로 작성되어 있다. Claude Code 세션에서는 Bash 도구(Git Bash 기반)로 그대로 실행한다. 네이티브 Windows PowerShell 5.1에서 직접 실행할 경우 `&&`는 지원되지 않으므로 `cmd1; if ($?) { cmd2 }` 형태로, `cp`는 `Copy-Item`으로 바꿔야 한다.
+
+## 실행 원칙 및 작업 분류 (MUST / SHOULD / STRETCH)
+
+- **한 세션(실행 단위)에서 Task를 전부 실행하지 않는다.** 정확히 하나의 Task만 진행 → 테스트 통과 확인 → 커밋 → 사용자 리뷰/승인 후에만 다음 Task로 진행한다 (superpowers:subagent-driven-development 또는 superpowers:executing-plans의 태스크 단위 체크포인트를 따른다).
+- 아래 분류는 핵심 시나리오(설계 문서 §8, 12단계)와 필수 요건 1~12에 대한 기여도를 기준으로 한다. MUST는 축소 불가, SHOULD는 시간이 부족하면 최소 구현으로 축소 가능, STRETCH는 전부 끝난 뒤에만 착수한다.
+
+| Task | 분류 | 근거 |
+|---|---|---|
+| 1. 모노레포 기본 구조 | MUST | 이후 모든 작업의 기반 |
+| 2. PostgreSQL/FastAPI 연결 | MUST | 데이터 저장 없이는 어떤 시나리오도 불가 |
+| 3. 핵심 데이터 모델 & migration | MUST | 요건 1, 2, 6의 직접 구현체 |
+| 4. 합성 데이터 seed | MUST | 요건 10(합성 데이터 전용), 이후 모든 테스트의 전제 |
+| 5. 인증 & 역할별 접근제어 | MUST | 요건 4, 5의 핵심, 이후 모든 엔드포인트의 전제 |
+| 6. 의사/환자 기본 화면 | MUST | 핵심 시나리오 1, 10단계(로그인)의 전제 |
+| 7. 담당 환자 조회 | MUST | 핵심 시나리오 2단계 |
+| 8. Encounter 기반 임상 타임라인 | MUST | 핵심 시나리오 3단계 |
+| 9. 검사결과 이상 플래그 | MUST | 핵심 시나리오 4, 5단계 |
+| 10. 알레르기-처방 충돌 알림 | MUST | 핵심 시나리오 6단계, 요건 9, 11 |
+| 11. Mock AI 요약 | MUST | 핵심 시나리오 7, 8단계, 요건 3, 7 |
+| 12. 의료진 승인 및 환자 공개 | MUST | 핵심 시나리오 9, 10, 11단계, 요건 8 |
+| 13. 감사 로그 조회 | MUST | 핵심 시나리오 12단계, 요건 5 |
+| 14. 진료과별 설정 기반 위젯 — 내분비내과 완전 구현 + 3개 진료과 config 파일 + 공통 렌더러 | MUST | 요건 12의 직접 증거 |
+| 14 확장분 — 정형외과 주요 위젯 완성도, 응급의학과 화면 다듬기 | SHOULD | 시간이 부족하면 각 config의 최소 위젯(placeholder 포함)만으로 축소 가능 |
+| 15a. FHIR Bundle 내보내기 | STRETCH | 요건 3은 6종 매핑 명세(문서)만으로 충족되며, 실제 내보내기는 선택 |
+| 15b. 응급의학과 고급 기능(실제 vitals/triage 모델) | STRETCH | 사용자가 명시적으로 "선택 기능"으로 지정 |
+| 15c. 정형외과 고급 기능(imaging 메타데이터) | STRETCH | 사용자가 명시적으로 "선택 기능"으로 지정 |
+| 15d. Break Glass | STRETCH | 사용자가 명시적으로 "선택 기능"으로 지정 |
+| 15e. 실제 LLM Provider 연동 | STRETCH | 사용자가 명시적으로 "선택 기능"으로 지정 |
+| 15f. 운영 배포 | STRETCH | 사용자가 명시적으로 "선택 기능"으로 지정 |
 
 ---
 
@@ -664,6 +699,7 @@ class SafetyAlertPriority(str, enum.Enum):
 
 class AssignmentRole(str, enum.Enum):
     ATTENDING_PHYSICIAN = "ATTENDING_PHYSICIAN"
+    CONSULTING_PHYSICIAN = "CONSULTING_PHYSICIAN"  # 협진 관계
     PRIMARY_NURSE = "PRIMARY_NURSE"
 ```
 
@@ -1138,7 +1174,7 @@ git commit -m "feat: add synthetic data seed script for demo doctor/nurse/patien
 
 **Interfaces:**
 - Consumes: `User`, `Role` from Task 3; `hash_password`/`verify_password` from Task 4
-- Produces: `POST /auth/login` → `{"access_token": str, "token_type": "bearer"}`; `get_current_user(...)` dependency; `require_roles(*roles)` dependency factory; `can_access_patient(user, patient_id, db) -> bool` (central rule: PATIENT role → only own `patient_id`; DOCTOR/NURSE → only if a `PatientAssignment` row exists for that patient+department; ADMIN_STAFF/SYSTEM_ADMIN → all patients) — every later router that touches patient data calls this.
+- Produces: `POST /auth/login` → `{"access_token": str, "token_type": "bearer"}`; `get_current_user(...)` dependency; `require_roles(*roles)` dependency factory; `can_access_patient(user, patient_id, db) -> bool` (central rule: PATIENT role → only own `patient_id`; DOCTOR/NURSE → only if a `PatientAssignment` row exists for that patient — attending or consulting for doctors, primary nurse for nurses; **ADMIN_STAFF/SYSTEM_ADMIN → always `False`**, since neither role has default access to clinical record content — see design spec §3.2a) — every later router that touches patient *clinical* data calls this.
 
 - [ ] **Step 1: Write the failing test (login)**
 
@@ -1332,16 +1368,32 @@ def test_unassigned_doctor_cannot_access_patient(db_session):
     assert can_access_patient(doctor, unassigned_patient.id, db_session) is False
 
 
-def test_admin_staff_can_access_any_patient(db_session):
-    from datetime import date
+def test_admin_staff_cannot_access_clinical_patient_data(db_session):
+    """ADMIN_STAFF manages front-desk/scheduling/basic administrative info,
+    not clinical record content — being ADMIN_STAFF must never by itself
+    grant can_access_patient, even for the patient the seed data creates."""
     seed(db_session)
     admin = db_session.query(User).filter_by(role=Role.ADMIN_STAFF).first()
+    patient = db_session.query(Patient).first()
 
-    any_patient = Patient(mrn="SYN-0004", full_name="임의환자", birth_date=date(2000, 1, 1), sex="M")
-    db_session.add(any_patient)
+    assert can_access_patient(admin, patient.id, db_session) is False
+
+
+def test_system_admin_cannot_access_clinical_patient_data(db_session):
+    """SYSTEM_ADMIN manages accounts/roles/system settings, not clinical
+    record content — same rule as ADMIN_STAFF applies here."""
+    from app.models import Role as RoleEnum
+
+    seed(db_session)
+    patient = db_session.query(Patient).first()
+    system_admin = User(
+        email="sysadmin@example.org", hashed_password="x",
+        full_name="시스템관리자", role=RoleEnum.SYSTEM_ADMIN,
+    )
+    db_session.add(system_admin)
     db_session.commit()
 
-    assert can_access_patient(admin, any_patient.id, db_session) is True
+    assert can_access_patient(system_admin, patient.id, db_session) is False
 ```
 
 - [ ] **Step 6: Run test to verify it fails**
@@ -1363,11 +1415,26 @@ from app.models import User, Role, PatientAssignment
 
 
 def can_access_patient(user: User, patient_id: int, db: Session) -> bool:
-    """Central authorization rule for all patient-scoped resources.
+    """Central authorization rule for all patient-scoped *clinical* resources
+    (timeline, lab results, prescriptions, AI summaries, audit logs, ...).
 
     PATIENT: only their own linked patient_id.
-    DOCTOR/NURSE: only patients with an active PatientAssignment to them.
-    ADMIN_STAFF/SYSTEM_ADMIN: all patients (administrative/system roles).
+    DOCTOR/NURSE: only patients with an active PatientAssignment to them
+        (attending or consulting physician; primary nurse). No distinction
+        is made here between assignment roles — any assignment row is
+        sufficient — because the assignment itself is what "담당 또는
+        협진 관계" and "배정" require; which clinical actions a NURSE vs a
+        DOCTOR may take once access is granted (e.g. NURSE cannot
+        prescribe or approve AI summaries) is enforced separately by
+        `require_roles` on each endpoint, not by this function.
+    ADMIN_STAFF/SYSTEM_ADMIN: always False. Neither role has default
+        access to clinical record content — ADMIN_STAFF's scope is
+        front-desk/scheduling/basic administrative info, SYSTEM_ADMIN's
+        scope is accounts/roles/system settings. Being ADMIN_STAFF or
+        SYSTEM_ADMIN must never by itself satisfy this check; if a future
+        administrative feature needs access to non-clinical fields (e.g.
+        scheduling), it must use its own, separately-scoped authorization
+        check rather than this one.
     """
     if user.role == Role.PATIENT:
         return user.patient_id == patient_id
@@ -1379,9 +1446,6 @@ def can_access_patient(user: User, patient_id: int, db: Session) -> bool:
             .first()
         )
         return assignment is not None
-
-    if user.role in (Role.ADMIN_STAFF, Role.SYSTEM_ADMIN):
-        return True
 
     return False
 ```
@@ -2248,7 +2312,7 @@ Append to `backend/tests/test_prescription_safety_alert.py`:
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models import Patient, SafetyAlertPriority
+from app.models import Encounter, Patient, SafetyAlertPriority
 from scripts.seed_synthetic_data import seed
 
 client = TestClient(app)
@@ -2261,11 +2325,12 @@ def _login(email):
 def test_prescribing_allergic_medication_creates_high_priority_alert(db_session, override_get_db):
     seed(db_session)
     patient = db_session.query(Patient).first()
+    encounter = db_session.query(Encounter).filter_by(patient_id=patient.id).first()
     token = _login("doctor.endo@example.org")
 
     response = client.post(
         f"/patients/{patient.id}/prescriptions",
-        json={"encounter_id": 1, "medication_name": "Penicillin", "dosage": "500mg"},
+        json={"encounter_id": encounter.id, "medication_name": "Penicillin", "dosage": "500mg"},
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -2280,11 +2345,12 @@ def test_prescribing_allergic_medication_creates_high_priority_alert(db_session,
 def test_prescribing_safe_medication_creates_no_alert(db_session, override_get_db):
     seed(db_session)
     patient = db_session.query(Patient).first()
+    encounter = db_session.query(Encounter).filter_by(patient_id=patient.id).first()
     token = _login("doctor.endo@example.org")
 
     response = client.post(
         f"/patients/{patient.id}/prescriptions",
-        json={"encounter_id": 1, "medication_name": "Metformin", "dosage": "500mg"},
+        json={"encounter_id": encounter.id, "medication_name": "Metformin", "dosage": "500mg"},
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -2462,6 +2528,11 @@ export default function PrescriptionFormPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // DEMO NOTE: encounter_id is hardcoded to 1 because this semester's seed
+    // data creates exactly one encounter per patient. This is a known
+    // simplification for the single-encounter demo dataset, not a bug — if
+    // a future task adds multi-encounter patients, this page must let the
+    // doctor pick which encounter the prescription belongs to instead.
     const res = await apiPost<{ safety_alert: SafetyAlert }>(
       `/patients/${patientId}/prescriptions`,
       { encounter_id: 1, medication_name: medication, dosage },
@@ -3058,7 +3129,7 @@ git commit -m "feat: doctor approval/rejection gates AI summary visibility to pa
 
 **Interfaces:**
 - Consumes: `AuditLog` (Task 3), `can_access_patient` (Task 5)
-- Produces: `GET /patients/{patient_id}/audit-logs` → `list[AuditLogOut]`, ordered by `created_at desc`; PATIENT role restricted to their own `patient_id` via `can_access_patient` (same rule used everywhere else); ADMIN_STAFF/SYSTEM_ADMIN can query any patient's log.
+- Produces: `GET /patients/{patient_id}/audit-logs` → `list[AuditLogOut]`, ordered by `created_at desc`; access is gated by the same `can_access_patient` rule as every other patient-scoped endpoint — PATIENT sees only their own log, assigned DOCTOR/NURSE see their assigned patients' logs, and ADMIN_STAFF/SYSTEM_ADMIN get `403` here too (no blanket admin access; a system-wide, non-patient-scoped audit view for SYSTEM_ADMIN is out of this semester's scope — see `docs/implementation-plan.md` category C).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3552,7 +3623,7 @@ git commit -m "feat: render department screens from JSON config via one shared w
 
 **Interfaces:**
 - Consumes: `Patient, Encounter, LabResult, Diagnosis, Allergy, Prescription` (Task 3)
-- Produces: `build_fhir_bundle(patient, encounters, lab_results, diagnoses, allergies, prescriptions) -> dict` (a `Bundle` resource with `Patient`/`Encounter`/`Observation`/`Condition`/`AllergyIntolerance`/`MedicationRequest` entries per `docs/fhir-mapping-spec.md`); `GET /patients/{patient_id}/fhir-bundle` (role DOCTOR/ADMIN_STAFF/SYSTEM_ADMIN)
+- Produces: `build_fhir_bundle(patient, encounters, lab_results, diagnoses, allergies, prescriptions) -> dict` (a `Bundle` resource with `Patient`/`Encounter`/`Observation`/`Condition`/`AllergyIntolerance`/`MedicationRequest` entries per `docs/fhir-mapping-spec.md`); `GET /patients/{patient_id}/fhir-bundle` (role DOCTOR only, gated by `can_access_patient` — this exports clinical record content, so ADMIN_STAFF/SYSTEM_ADMIN are excluded per the same policy as every other clinical endpoint)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3571,7 +3642,7 @@ def test_bundle_includes_patient_resource():
 
 - [ ] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`
 
-- [ ] **Step 3: Implement `build_fhir_bundle` mapping each entity per the 6-resource table in the design spec, and an endpoint that assembles a patient's full record and calls it.**
+- [ ] **Step 3: Implement `build_fhir_bundle` mapping each entity per the 6-resource table in the design spec, and an endpoint that assembles a patient's full record and calls it.** Register the endpoint on its own `APIRouter(prefix="/patients", tags=["fhir_export"])` in `backend/app/routers/fhir_export.py` with a single route `GET /{patient_id}/fhir-bundle` — this is a distinct path from every other `/patients/...` router (Tasks 7/8/10/12/13), so no prefix or endpoint collision.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -3614,6 +3685,8 @@ Design constraint to encode in the test: a break-glass access must always produc
 - Create: `backend/tests/test_llm_summary_generator.py` (mock the HTTP call; do not hit a real API in automated tests)
 
 Because Task 11 already isolated the generator behind a plain function signature, this task only needs to add a second implementation and a switch — no other file changes.
+
+**Secret handling (required if this task is picked up):** the real provider's API key must be read from `Settings` (e.g. `settings.llm_api_key`, sourced from `backend/.env`) and never hardcoded in source. `backend/.env` is already listed in `.gitignore` (Task 1) — only `backend/.env.example` (a placeholder, no real key) is committed.
 
 ### Task 15f (선택): 운영 배포
 

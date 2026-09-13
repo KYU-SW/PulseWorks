@@ -8,7 +8,7 @@
 
 - **데이터 모델 & DB**: Patient, Encounter, Diagnosis, Order, LabResult, Prescription, ClinicalNote, Allergy, AiSummary, SafetyAlert, AuditLog, User(역할 포함) — PostgreSQL + SQLAlchemy + Alembic 마이그레이션
 - **인증**: 이메일/사번 + 비밀번호 로그인, JWT 세션
-- **RBAC & 감사 로그**: DOCTOR/NURSE/ADMIN_STAFF/SYSTEM_ADMIN/PATIENT 5개 역할, 담당 환자 관계 기반 접근 제어를 중앙 authorization 계층(FastAPI 공통 의존성)으로 강제. 모든 PHI 접근을 AuditLog에 기록. PATIENT 역할의 본인 데이터 한정 조회 및 자가측정값 입력을 백엔드에서 강제
+- **RBAC & 감사 로그**: DOCTOR/NURSE/ADMIN_STAFF/SYSTEM_ADMIN/PATIENT 5개 역할, 담당 환자 관계(주치의·협진의·담당간호사) 기반 접근 제어를 중앙 authorization 계층(FastAPI 공통 의존성)으로 강제. `ADMIN_STAFF`/`SYSTEM_ADMIN`은 역할 자체만으로는 어떤 환자의 임상기록에도 접근할 수 없다(최소권한 원칙 — 접근권한 매트릭스 참조). 모든 PHI 접근을 AuditLog에 기록. PATIENT 역할의 본인 데이터 한정 조회 및 자가측정값 입력을 백엔드에서 강제
 - **AI 요약**: 목업(규칙/템플릿 기반) 요약 생성기, `source_record_ids` 근거 연결, `DRAFT`/`APPROVED`/`REJECTED` 상태 및 승인·반려 API(DOCTOR 전용), 승인=공개 처리
 - **환자 안전 알림**: 알레르기-처방 충돌 규칙, 검사수치 이상범위 플래그 규칙, `SafetyAlert`(rule_id/evidence/priority) 생성 및 조회
 - **진료과별 설정 기반 화면**:
