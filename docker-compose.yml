@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: emr
+      POSTGRES_PASSWORD: emr
+      POSTGRES_DB: emr
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      # Overrides .env's DATABASE_URL: inside the compose network the DB
+      # is reachable at hostname "db", not "localhost" (which .env is set
+      # to, so that host-side pytest runs against the port published on
+      # 5432 can reach it). JWT_SECRET etc. still come from .env via env_file.
+      DATABASE_URL: postgresql+psycopg2://emr:emr@db:5432/emr
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+    command: npm run dev -- --host
+
+volumes:
+  db_data:
