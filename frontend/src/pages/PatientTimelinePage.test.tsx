@@ -17,7 +17,9 @@ const SAMPLE_TIMELINE = {
       event_type: "LAB_RESULT",
       event_time: "2026-09-05T09:00:00+00:00",
       title: "HbA1c",
-      summary: "8.1% (참고범위 4.0-6.0%) - 참고범위 이탈",
+      // 실제 백엔드는 값/단위/참고범위만 표시하고 이상 여부는 판정하지
+      // 않는다(Task 9 전담) — 목 데이터도 그 계약과 일치시킨다.
+      summary: "8.1% (참고범위 4.0-6.0%)",
       source_type: "INSTITUTION_GENERATED",
       department: "내분비내과",
     },

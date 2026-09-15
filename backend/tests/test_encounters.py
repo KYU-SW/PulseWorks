@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models import AuditLog, Patient, User
+from app.routers.encounters import _truncate_for_display
 from scripts.seed_synthetic_data import seed
 
 client = TestClient(app)
@@ -44,15 +45,38 @@ def test_assigned_doctor_can_view_timeline(db_session, override_get_db):
     assert body["patient"]["mrn"] == "SYN-0001"
 
 
-# 2 & 3. 미배정 환자 접근 실패 (patient_id 조작/IDOR)
-def test_unassigned_doctor_gets_403(db_session, override_get_db):
+# 2 & 3. 미배정 환자 접근 실패 (patient_id 조작/IDOR) — 존재 노출을 줄이기
+# 위해 "존재하지 않음"과 동일한 404로 통일한다(403이 아니다).
+def test_unassigned_doctor_gets_404_not_403(db_session, override_get_db):
     seed(db_session)
     ortho_patient = db_session.query(Patient).filter_by(mrn="SYN-0002").first()
     token = _login(ENDOCRINE_DOCTOR_EMAIL)  # 내분비내과 의사가 정형외과 환자를 조작해 조회 시도
 
     response = client.get(f"/patients/{ortho_patient.id}/timeline", headers=_auth_header(token))
 
-    assert response.status_code == 403
+    assert response.status_code == 404
+    assert response.json()["detail"] == "환자를 찾을 수 없거나 조회할 수 없습니다."
+
+
+# 미배정 환자(존재함)와 존재하지 않는 환자가 완전히 동일한 상태코드/응답을
+# 반환해야 한다 — 그래야 응답만으로 "이 patient_id가 존재하는지"를 구분할
+# 수 없다.
+def test_unassigned_and_nonexistent_patient_return_identical_response(
+    db_session, override_get_db
+):
+    seed(db_session)
+    ortho_patient = db_session.query(Patient).filter_by(mrn="SYN-0002").first()
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+
+    unassigned_response = client.get(
+        f"/patients/{ortho_patient.id}/timeline", headers=_auth_header(token)
+    )
+    nonexistent_response = client.get(
+        "/patients/999999/timeline", headers=_auth_header(token)
+    )
+
+    assert unassigned_response.status_code == nonexistent_response.status_code == 404
+    assert unassigned_response.json() == nonexistent_response.json()
 
 
 # 4. NURSE 접근 거부
@@ -113,13 +137,14 @@ def test_invalid_token_is_unauthorized(db_session, override_get_db):
     assert response.status_code == 401
 
 
-# 9. 존재하지 않는 환자는 404
+# 9. 존재하지 않는 환자는 404 (+ 일반화된 메시지)
 def test_nonexistent_patient_returns_404(db_session, override_get_db):
     seed(db_session)
     token = _login(ENDOCRINE_DOCTOR_EMAIL)
 
     response = client.get("/patients/999999/timeline", headers=_auth_header(token))
     assert response.status_code == 404
+    assert response.json()["detail"] == "환자를 찾을 수 없거나 조회할 수 없습니다."
 
 
 # 10. 5개 event_type 반환 확인
@@ -277,3 +302,84 @@ def test_hba1c_values_appear_in_endocrine_timeline(db_session, override_get_db):
     assert "7.2" in summaries
     assert "7.8" in summaries
     assert "8.1" in summaries
+
+
+# 보완: LAB_RESULT summary에 이상 판정 문구가 없어야 한다 (Task 9 전담 사항).
+def test_lab_result_summary_has_no_abnormality_judgment(db_session, override_get_db):
+    seed(db_session)
+    patient_id = _endo_patient_id(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+
+    response = client.get(f"/patients/{patient_id}/timeline", headers=_auth_header(token))
+    lab_summaries = [
+        item["summary"] for item in response.json()["timeline"] if item["event_type"] == "LAB_RESULT"
+    ]
+
+    assert len(lab_summaries) > 0
+    for summary in lab_summaries:
+        assert "이탈" not in summary
+        assert "정상" not in summary
+        assert "비정상" not in summary
+        assert "HIGH" not in summary
+        assert "LOW" not in summary
+        # 값/단위/참고범위는 그대로 있어야 한다.
+        assert "참고범위" in summary
+
+
+# 보완: 응급의학과 데이터(참고범위를 크게 벗어난 Troponin)에도 판정 문구가
+# 없어야 한다 — 값 자체가 극단적이어도 Task 8은 판정하지 않는다.
+def test_emergency_lab_summary_also_has_no_abnormality_judgment(db_session, override_get_db):
+    seed(db_session)
+    emergency_patient = db_session.query(Patient).filter_by(mrn="SYN-0003").first()
+    token = _login("emergency.doctor@example.test")
+
+    response = client.get(
+        f"/patients/{emergency_patient.id}/timeline", headers=_auth_header(token)
+    )
+    troponin_summary = next(
+        item["summary"]
+        for item in response.json()["timeline"]
+        if item["title"] == "Troponin"
+    )
+
+    assert "0.8" in troponin_summary
+    assert "이탈" not in troponin_summary
+    assert "HIGH" not in troponin_summary
+
+
+# 보완: _truncate_for_display 단위 테스트
+def test_truncate_for_display_leaves_short_text_unchanged():
+    short_text = "짧은 진료기록입니다."
+    assert _truncate_for_display(short_text) == short_text
+
+
+def test_truncate_for_display_leaves_exactly_300_chars_unchanged():
+    text_300 = "가" * 300
+    assert _truncate_for_display(text_300) == text_300
+
+
+def test_truncate_for_display_truncates_long_text_with_ellipsis():
+    long_text = "나" * 400
+    result = _truncate_for_display(long_text)
+
+    assert result == "나" * 300 + "..."
+    assert result.endswith("...")
+    assert len(result) == 303
+
+
+# 보완: 실제 API 응답에서도 CLINICAL_NOTE summary가 300자+말줄임을 넘지 않음
+def test_clinical_note_summary_never_exceeds_truncation_limit(db_session, override_get_db):
+    seed(db_session)
+    patient_id = _endo_patient_id(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+
+    response = client.get(f"/patients/{patient_id}/timeline", headers=_auth_header(token))
+    note_summaries = [
+        item["summary"] for item in response.json()["timeline"] if item["event_type"] == "CLINICAL_NOTE"
+    ]
+
+    assert len(note_summaries) > 0
+    for summary in note_summaries:
+        assert len(summary) <= 303
+        if len(summary) == 303:
+            assert summary.endswith("...")

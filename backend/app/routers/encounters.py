@@ -41,6 +41,14 @@ def _sort_key(item: TimelineItemOut) -> tuple:
     return (-item.event_time.timestamp(), -item.encounter_id, item.event_type, -item.id)
 
 
+def _truncate_for_display(text: str, limit: int = 300) -> str:
+    """단순 표시용 길이 제한 — AI 요약이 아니다. 원문이 limit자 이하면
+    그대로 반환하고, 넘으면 앞부분만 잘라 말줄임(...)을 붙인다."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
+
+
 @router.get("/{patient_id}/timeline", response_model=PatientTimelineOut)
 def get_patient_timeline(
     patient_id: int,
@@ -51,13 +59,17 @@ def get_patient_timeline(
     사용자가 조작해도 매 요청마다 담당 관계(can_access_patient)를 다시
     검사한다(IDOR 방지). 전체 환자/전체 임상정보를 먼저 조회한 뒤 Python에서
     거르지 않고, 권한 확인 후 이 환자의 데이터만 DB에서 조회한다.
+
+    존재하지 않는 patient_id와, 존재하지만 이 DOCTOR에게 배정되지 않은
+    patient_id는 **의도적으로 같은 404 응답**을 반환한다 — 둘을 구분하면
+    "이 patient_id는 실제로 존재한다"는 사실 자체가 새어나가기 때문이다.
+    401(미인증)과 403(DOCTOR 이외 역할)은 이 구분과 무관하게 그대로 유지한다.
     """
     patient = db.query(Patient).filter_by(id=patient_id).first()
-    if patient is None:
-        raise HTTPException(status_code=404, detail="Patient not found")
-
-    if not can_access_patient(user, patient_id, db):
-        raise HTTPException(status_code=403, detail="Not authorized for this patient")
+    if patient is None or not can_access_patient(user, patient_id, db):
+        raise HTTPException(
+            status_code=404, detail="환자를 찾을 수 없거나 조회할 수 없습니다."
+        )
 
     encounters = db.query(Encounter).filter_by(patient_id=patient_id).all()
     encounter_ids = [encounter.id for encounter in encounters]
@@ -101,7 +113,10 @@ def get_patient_timeline(
 
         for lab in db.query(LabResult).filter(LabResult.encounter_id.in_(encounter_ids)).all():
             department_label = _DEPARTMENT_LABELS[department_by_encounter_id[lab.encounter_id]]
-            abnormal_note = " - 참고범위 이탈" if lab.is_abnormal else ""
+            # Task 8은 DB에 저장된 값/단위/참고범위를 그대로 표시만 한다.
+            # "참고범위 이탈"/HIGH/LOW 같은 판정은 절대 여기서 만들지 않는다 —
+            # 그 판정은 Task 9의 evaluate_lab_abnormal() 중앙 규칙 함수가
+            # 전담한다(LabResult.is_abnormal 컬럼은 이 응답에 포함하지 않음).
             items.append(
                 TimelineItemOut(
                     id=lab.id,
@@ -112,7 +127,6 @@ def get_patient_timeline(
                     summary=(
                         f"{lab.value}{lab.unit} "
                         f"(참고범위 {lab.reference_low}-{lab.reference_high}{lab.unit})"
-                        f"{abnormal_note}"
                     ),
                     source_type=lab.source_type.value,
                     department=department_label,
@@ -149,7 +163,7 @@ def get_patient_timeline(
                     event_type="CLINICAL_NOTE",
                     event_time=note.created_at,
                     title="진료기록",
-                    summary=note.note_text,
+                    summary=_truncate_for_display(note.note_text),
                     source_type=note.source_type.value,
                     department=department_label,
                 )
