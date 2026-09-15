@@ -94,6 +94,17 @@ describe("DoctorDashboard", () => {
     expect(screen.getByText(/합성환자-일반01/)).toBeInTheDocument();
   });
 
+  it("links to the patient's detail timeline page", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_PATIENTS));
+    renderDashboard();
+
+    await screen.findByText(/합성환자-내분비01/);
+    const detailLinks = screen.getAllByRole("link", { name: "상세보기" });
+    expect(detailLinks).toHaveLength(SAMPLE_PATIENTS.length);
+    expect(detailLinks[0]).toHaveAttribute("href", "/doctor/patients/1");
+  });
+
   // 5. 합성 데이터 안내 표시
   it("shows the synthetic-data disclaimer", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));

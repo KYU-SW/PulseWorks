@@ -4,6 +4,7 @@ import ProtectedRoute from "./routes/ProtectedRoute";
 import LoginPage from "./pages/LoginPage";
 import DoctorDashboard from "./pages/DoctorDashboard";
 import PatientPortalPage from "./pages/PatientPortalPage";
+import PatientTimelinePage from "./pages/PatientTimelinePage";
 import UnsupportedRolePage from "./pages/UnsupportedRolePage";
 
 export default function App() {
@@ -17,6 +18,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["DOCTOR"]}>
                 <DoctorDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/doctor/patients/:patientId"
+            element={
+              <ProtectedRoute allowedRoles={["DOCTOR"]}>
+                <PatientTimelinePage />
               </ProtectedRoute>
             }
           />

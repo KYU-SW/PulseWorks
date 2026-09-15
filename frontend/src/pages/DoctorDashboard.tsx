@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../api/client";
 import { AssignedPatient, getAssignedPatients } from "../api/patients";
@@ -79,7 +79,8 @@ export default function DoctorDashboard() {
           {patients.map((patient) => (
             <li key={patient.id}>
               {patient.name} ({patient.mrn}) — 생년월일 {patient.birth_date} —{" "}
-              {patient.assignment_role}
+              {patient.assignment_role}{" "}
+              <Link to={`/doctor/patients/${patient.id}`}>상세보기</Link>
             </li>
           ))}
         </ul>
