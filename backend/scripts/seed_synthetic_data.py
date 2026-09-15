@@ -9,16 +9,19 @@
 - Diagnosis.description / ClinicalNote.note_text: 필요한 경우 "(합성 데이터)" 표시
 - 주민등록번호 등 실제 개인식별번호 필드는 아예 만들지 않는다.
 
-이 Task(합성 데이터 Seed)는 인증/로그인을 구현하지 않는다. User.hashed_password는
-Task 3에서 이미 NOT NULL로 정의되어 있어 값이 필요하지만, 여기서는 실제 해시를
-계산하지 않고 그 자체로 인증에 쓰일 수 없는 명백한 placeholder 문자열을 넣는다.
-실제 비밀번호 해시는 로그인 기능을 구현하는 후속 Task에서 처리한다.
+Task 4(합성 데이터 Seed)는 인증/로그인을 구현하지 않았기 때문에, 처음 만들어질
+때는 User.hashed_password에 그 자체로 인증에 쓰일 수 없는 placeholder 문자열이
+들어갔다. Task 5(인증)부터는 이 스크립트가 실제 bcrypt 해시로 교체한다 —
+아래 DEMO_PASSWORD는 로컬 테스트/시연 전용 합성 계정 비밀번호이며, 실제 운영
+자격증명이 아니다. Seed를 다시 실행하면 이미 존재하는 계정도 placeholder가
+남아있는 경우에만 해시가 갱신되고, 다른 임상 데이터는 중복 생성되지 않는다.
 """
 
 from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.core.security import hash_password
 from app.models import (
     Allergy,
     AssignmentRole,
@@ -37,10 +40,17 @@ from app.models import (
     User,
 )
 
-# Not a real password hash — a login/auth Task must replace this with
-# app.core.security.hash_password() once that exists. Kept unmistakably
-# non-functional on purpose.
+# Not a real password hash — Task 5 replaces this with a real bcrypt hash of
+# DEMO_PASSWORD for every synthetic account. Kept only as the sentinel value
+# _get_or_create_user checks for to decide whether an existing row's
+# password still needs healing.
 PLACEHOLDER_HASHED_PASSWORD = "SEED_PLACEHOLDER_NOT_A_REAL_HASH__SEE_AUTH_TASK"
+
+# Local demo/test password for every synthetic account this script creates.
+# This is NOT a real credential — it only ever protects synthetic accounts
+# in a local/CI database and must never be reused for anything real. Also
+# documented in README.md's local demo accounts section.
+DEMO_PASSWORD = "demo1234"
 
 
 def _is_abnormal(value: float, reference_low: float, reference_high: float) -> bool:
@@ -55,8 +65,13 @@ def _is_abnormal(value: float, reference_low: float, reference_high: float) -> b
 def _get_or_create_user(db: Session, email: str, **fields) -> tuple[User, bool]:
     user = db.query(User).filter_by(email=email).first()
     if user is not None:
+        # Heal accounts created before Task 5 existed (still carrying
+        # Task 4's non-functional placeholder) without touching anything
+        # else about the row, and without creating a new row.
+        if user.hashed_password == PLACEHOLDER_HASHED_PASSWORD:
+            user.hashed_password = hash_password(DEMO_PASSWORD)
         return user, False
-    user = User(email=email, hashed_password=PLACEHOLDER_HASHED_PASSWORD, **fields)
+    user = User(email=email, hashed_password=hash_password(DEMO_PASSWORD), **fields)
     db.add(user)
     db.flush()
     return user, True
@@ -114,13 +129,17 @@ def seed(db: Session) -> None:
         db, "SYN-0001",
         full_name="합성환자-내분비01", birth_date=date(1968, 4, 12), sex="F",
     )
+    # Outside the `if endo_created:` gate on purpose: this must run on every
+    # seed() call (not just when the Patient row is brand new) so that a
+    # rerun still heals patient1's password if it's still the Task 4
+    # placeholder — get_or_create_user's own existence check makes this a
+    # no-op (no duplicate row) when patient1 already has a real hash.
+    _get_or_create_user(
+        db, "patient1@example.test",
+        full_name=endo_patient.full_name, role=Role.PATIENT, patient_id=endo_patient.id,
+    )
 
     if endo_created:
-        _get_or_create_user(
-            db, "patient1@example.test",
-            full_name=endo_patient.full_name, role=Role.PATIENT, patient_id=endo_patient.id,
-        )
-
         db.add(
             PatientAssignment(
                 patient_id=endo_patient.id,
@@ -296,13 +315,14 @@ def seed(db: Session) -> None:
         db, "SYN-0002",
         full_name="합성환자-정형외과01", birth_date=date(1980, 11, 3), sex="M",
     )
+    # Same reasoning as patient1 above: must run every time, not only when
+    # the Patient row is new, so a rerun heals patient2's password too.
+    _get_or_create_user(
+        db, "patient2@example.test",
+        full_name=ortho_patient.full_name, role=Role.PATIENT, patient_id=ortho_patient.id,
+    )
 
     if ortho_created:
-        _get_or_create_user(
-            db, "patient2@example.test",
-            full_name=ortho_patient.full_name, role=Role.PATIENT, patient_id=ortho_patient.id,
-        )
-
         db.add(
             PatientAssignment(
                 patient_id=ortho_patient.id,

@@ -5,6 +5,12 @@ alembic==1.13.2
 psycopg2-binary==2.9.9
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# passlib 1.7.4 probes bcrypt's __about__.__version__ to pick its safe
+# code path; bcrypt>=4.1 removed that attribute, which makes passlib fall
+# through to a self-test that itself crashes on modern bcrypt's strict
+# 72-byte secret limit (ValueError instead of the old silent truncation).
+# Pinning to the last version that still has __about__ avoids both.
+bcrypt==4.0.1
 pydantic-settings==2.5.2
 pytest==8.3.3
 httpx==0.27.2

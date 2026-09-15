@@ -3,8 +3,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+from app.routers import auth
 
 app = FastAPI(title="EMR Prototype")
+app.include_router(auth.router)
 
 
 @app.get("/health")

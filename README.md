@@ -58,9 +58,6 @@ curl http://localhost:8000/health/db
 - `Patient`/`User.full_name`은 전부 "합성"이 포함된 placeholder 이름 (예: `합성환자-내분비01`)
 - 진단·진료기록 등 임상 텍스트에는 필요한 경우 "(합성 데이터)" 표시를 붙임
 - 주민등록번호 등 실제 개인식별번호 필드는 스키마에도, seed 데이터에도 없음
-- `User.hashed_password`는 실제 비밀번호 해시가 아니라 인증에 쓰일 수 없는
-  명백한 placeholder 문자열이다(`SEED_PLACEHOLDER_NOT_A_REAL_HASH__...`).
-  실제 비밀번호 해시는 로그인 기능을 구현하는 후속 Task에서 처리한다.
 
 실행 방법 (idempotent — 여러 번 실행해도 중복 생성되지 않음):
 
@@ -68,3 +65,30 @@ curl http://localhost:8000/health/db
 cd backend
 python -m scripts.seed_synthetic_data
 ```
+
+### 로컬 데모 계정 (실제 운영 자격증명 아님)
+
+Task 5부터 모든 합성 계정은 실제 bcrypt 해시로 로그인할 수 있다. 비밀번호는
+전부 동일하게 `demo1234`이며(`scripts/seed_synthetic_data.py`의 `DEMO_PASSWORD`),
+**로컬/CI의 합성 데이터베이스에서만 의미가 있는 교육용 비밀번호**다 — 실제 서비스
+자격증명으로 오해하거나 재사용해서는 안 된다.
+
+| 이메일 | 역할 |
+|---|---|
+| `endocrine.doctor@example.test` | DOCTOR (내분비내과) |
+| `orthopedic.doctor@example.test` | DOCTOR (정형외과) |
+| `emergency.doctor@example.test` | DOCTOR (응급의학과) |
+| `nurse1@example.test` | NURSE |
+| `admin.staff@example.test` | ADMIN_STAFF |
+| `system.admin@example.test` | SYSTEM_ADMIN |
+| `patient1@example.test` | PATIENT (내분비내과 핵심 환자) |
+| `patient2@example.test` | PATIENT (정형외과 핵심 환자) |
+
+```
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"endocrine.doctor@example.test","password":"demo1234"}'
+```
+
+기존에 Task 4의 placeholder 해시로 만들어진 계정이 있어도, seed 스크립트를 다시
+실행하면 해당 계정만 실제 해시로 갱신되고 임상 데이터는 중복 생성되지 않는다.
