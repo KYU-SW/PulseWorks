@@ -46,6 +46,36 @@ curl http://localhost:8000/health
 curl http://localhost:8000/health/db
 ```
 
+### 프론트엔드 환경변수와 CORS (개발 전용 설정)
+
+프론트엔드는 API 주소를 코드에 하드코딩하지 않고 `VITE_API_BASE_URL`
+환경변수(`frontend/.env`, `.env.example`에 예시 있음)로 읽는다. 브라우저는
+항상 호스트에 게시된 `http://localhost:8000`을 쓰고, Docker Compose 내부
+서비스 주소(`http://backend:8000`)는 브라우저 코드에서 절대 쓰지 않는다
+(브라우저는 그 호스트명을 해석할 수 없다).
+
+React 개발 서버(`http://localhost:5173`)와 FastAPI(`http://localhost:8000`)는
+포트가 달라 서로 다른 origin이라, 브라우저가 `fetch` 전에 보내는 CORS
+preflight를 FastAPI가 통과시켜줘야 한다. `backend/app/main.py`에 **개발
+전용** `CORSMiddleware`를 추가했다:
+
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+```
+
+- `allow_origins`는 `["*"]`가 아니라 개발 서버 주소만 명시적으로 허용한다.
+- `allow_credentials=False` — 인증은 쿠키가 아니라 `Authorization: Bearer`
+  헤더로 하므로 자격증명 포함 요청이 필요 없다.
+- **향후 배포 시**: 허용 Origin을 지금처럼 코드에 고정하지 말고 환경변수로
+  관리해야 한다(예: `CORS_ALLOWED_ORIGINS`를 `Settings`에 추가해 배포 도메인
+  목록을 주입). 지금은 로컬 개발용 단일 origin만 허용한다.
+
 ## 합성(가짜) 데이터 — 실제 환자정보 아님
 
 `backend/scripts/seed_synthetic_data.py`가 만드는 User/Patient/임상 데이터는
