@@ -1215,12 +1215,14 @@ git commit -m "feat: add synthetic data seed script for demo doctor/nurse/patien
 - Create: `backend/tests/test_authorization.py`
 
 **Interfaces:**
-- Consumes: `User`, `Role` from Task 3; `hash_password`/`verify_password` from Task 4
-- Produces: `POST /auth/login` → `{"access_token": str, "token_type": "bearer"}`; `get_current_user(...)` dependency; `require_roles(*roles)` dependency factory; `can_access_patient(user, patient_id, db) -> bool` (central rule: PATIENT role → only own `patient_id`; DOCTOR/NURSE → only if a `PatientAssignment` row exists for that patient — attending or consulting for doctors, primary nurse for nurses; **ADMIN_STAFF/SYSTEM_ADMIN → always `False`**, since neither role has default access to clinical record content — see design spec §3.2a) — every later router that touches patient *clinical* data calls this.
+- Consumes: `User`, `Role`, `AuditLog` from Task 3; `PLACEHOLDER_HASHED_PASSWORD` from Task 4 (healed here, not before)
+- Produces: `hash_password`/`verify_password`/`create_access_token`/`decode_access_token` (this task creates `app/core/security.py` fresh — see Step 3's note); `POST /auth/login` → `{"access_token": str, "token_type": "bearer"}` (writes a `LOGIN` audit entry); `get_current_user(...)` dependency; `require_roles(*roles)` dependency factory; `can_access_patient(user, patient_id, db) -> bool` (central rule: PATIENT role → only own `patient_id`; DOCTOR/NURSE → only if a `PatientAssignment` row exists for that patient — attending or consulting for doctors, primary nurse for nurses; **ADMIN_STAFF/SYSTEM_ADMIN → always `False`**, since neither role has default access to clinical record content — see design spec §3.2a); `write_audit_log(...)` from `app/services/audit.py` (moved forward from its originally later slot) — every later router that touches patient *clinical* data calls `can_access_patient`.
 
-- [ ] **Step 1: Write the failing test (login)**
+- [x] **Step 1: Write the failing test (login)**
 
-`backend/tests/test_auth.py`
+> **Superseded by this session's explicit Task 5 re-specification**: seeded emails are `@example.test` (not `@example.org`), and the actual `test_auth.py`/`test_authorization.py` cover 20 named test cases (login success/wrong-password/nonexistent-email, token presence, get_current_user, missing/invalid JWT via a throwaway `auth_test_client` fixture, require_roles pass/fail, all 5 roles × can_access_patient, no hashed_password in the response, no leftover placeholder password, and a login audit-log entry) rather than the 2 sketched below. See the Task 5 completion report for the full list.
+
+`backend/tests/test_auth.py` (원래 계획의 스케치 — 실제로는 위 설명대로 대체됨)
 ```python
 from fastapi.testclient import TestClient
 
@@ -1267,12 +1269,16 @@ def override_get_db(db_session):
     app.dependency_overrides.clear()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && pytest tests/test_auth.py -v`
 Expected: FAIL — `404 Not Found` (no `/auth/login` route yet)
 
-- [ ] **Step 3: Implement JWT helpers, schemas, and the login route**
+> Actual: `ModuleNotFoundError` (import of `scripts.seed_synthetic_data.DEMO_PASSWORD`, which didn't exist yet) and, in `test_authorization.py`, `ModuleNotFoundError: No module named 'app.core.security'` — same "doesn't exist yet" failure class as expected, different exact message because the test content differs from the sketch.
+
+- [x] **Step 3: Implement JWT helpers, schemas, and the login route**
+
+> Actual: `app/core/security.py` did not exist before this task (Task 4 was re-scoped to exclude it — see its completion report), so this created it fresh rather than appending. Also added `app/services/audit.py` (`write_audit_log`, moved forward from its originally later slot) and wired `POST /auth/login` to write a `LOGIN` audit entry on success. Hit and fixed two real environment bugs along the way: (1) `passlib==1.7.4` + modern `bcrypt` crashed with `ValueError: password cannot be longer than 72 bytes` during passlib's own internal version-detection self-test (fixed by pinning `bcrypt==4.0.1` in `requirements.txt`); (2) SQLite `:memory:` test engine returned "no such table: users" specifically for `TestClient`-based tests, because Starlette dispatches sync routes to a worker thread and the default SQLite pool hands that thread a distinct, empty database — fixed by adding `poolclass=StaticPool` to `tests/conftest.py`'s engine.
 
 Modify `backend/app/core/security.py` (append to the file from Task 4):
 ```python
@@ -1356,14 +1362,18 @@ def health_db(db: Session = Depends(get_db)):
     return {"status": "ok", "database": "connected"}
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && pytest tests/test_auth.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Write the failing test (authorization — PATIENT self-only rule)**
+> Actual: 9 passed (this session's expanded test_auth.py, not the sketch's 2).
 
-`backend/tests/test_authorization.py`
+- [x] **Step 5: Write the failing test (authorization — PATIENT self-only rule)**
+
+> **Superseded** — `test_authorization.py` actually has 11 tests: the 6 below plus explicit NURSE assigned/unassigned cases, `require_roles` pass/fail via `auth_test_client`, and a "same department alone doesn't grant access" check. The `can_access_patient` implementation itself (Step 7) already matched this session's ADMIN_STAFF/SYSTEM_ADMIN-always-False policy from the earlier plan-review round, so no logic changes were needed there.
+
+`backend/tests/test_authorization.py` (원래 계획의 스케치 — 실제로는 위 설명대로 확장됨)
 ```python
 from app.models import Role, User, Patient
 from app.services.authorization import can_access_patient
@@ -1438,12 +1448,16 @@ def test_system_admin_cannot_access_clinical_patient_data(db_session):
     assert can_access_patient(system_admin, patient.id, db_session) is False
 ```
 
-- [ ] **Step 6: Run test to verify it fails**
+- [x] **Step 6: Run test to verify it fails**
 
 Run: `cd backend && pytest tests/test_authorization.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.services.authorization'`
 
-- [ ] **Step 7: Implement the central authorization service and request dependencies**
+> Actual: matched (`ModuleNotFoundError: No module named 'app.core.security'`, hit first at import time — same "doesn't exist yet" class).
+
+- [x] **Step 7: Implement the central authorization service and request dependencies**
+
+> Actual: implemented exactly as shown below — no changes needed, since the ADMIN_STAFF/SYSTEM_ADMIN-always-False policy and the RESTRICT/assignment-based DOCTOR/NURSE rule were already fixed in this file's text during the pre-Task-1 plan review round.
 
 `backend/app/services/__init__.py`
 ```python
@@ -1528,17 +1542,21 @@ def require_roles(*roles):
     return _checker
 ```
 
-- [ ] **Step 8: Run test to verify it passes**
+- [x] **Step 8: Run test to verify it passes**
 
 Run: `cd backend && pytest tests/test_authorization.py -v`
 Expected: PASS
 
-- [ ] **Step 9: Commit**
+> Actual: 11 passed. Full backend suite: 40 passed (up from Task 4's 20). Also verified against the real Postgres container: `docker compose exec backend python -m scripts.seed_synthetic_data` healed all 8 accounts' placeholder hashes to real bcrypt hashes (idempotent — row counts unchanged), and `curl -X POST http://localhost:8000/auth/login` against the running `backend` container returned a real JWT for the correct password and a generic 401 for a wrong one, with a matching `LOGIN` row in `audit_logs`.
+
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/app/schemas/auth.py backend/app/core/security.py backend/app/core/deps.py backend/app/services backend/app/routers/auth.py backend/app/main.py backend/tests/test_auth.py backend/tests/test_authorization.py backend/tests/conftest.py
 git commit -m "feat: add JWT login and central role/assignment-based authorization service"
 ```
+
+> Actual commit: `2f0c987` (also included `README.md`, `backend/requirements.txt` (bcrypt pin), and `backend/scripts/seed_synthetic_data.py` (password healing + a real idempotency bug fix — see the Task 5 completion report)).
 
 ---
 
