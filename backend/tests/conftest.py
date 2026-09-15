@@ -23,7 +23,13 @@ def db_session():
         cursor.close()
 
     Base.metadata.create_all(engine)
-    TestingSessionLocal = sessionmaker(bind=engine)
+    # expire_on_commit=False: SQLite's DATETIME storage does not actually
+    # preserve timezone offsets (unlike Postgres's real timestamptz), so a
+    # default session would re-read a naive datetime from disk after every
+    # commit. Keeping already-committed Python objects in memory instead of
+    # re-querying lets tests correctly assert that the *application* set
+    # timezone-aware datetimes, independent of this SQLite storage quirk.
+    TestingSessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
     session = TestingSessionLocal()
     try:
         yield session

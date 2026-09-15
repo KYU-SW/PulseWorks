@@ -45,3 +45,26 @@ docker compose up -d db backend
 curl http://localhost:8000/health
 curl http://localhost:8000/health/db
 ```
+
+## 합성(가짜) 데이터 — 실제 환자정보 아님
+
+`backend/scripts/seed_synthetic_data.py`가 만드는 User/Patient/임상 데이터는
+**전부 100% 합성(가짜) 교육용 데이터**다. 실제 환자, 실제 의료진, 실제
+의료기관의 정보를 담지 않으며, 여기 적힌 진단·검사·처방 수치를 실제 임상
+판단 기준으로 사용해서는 안 된다.
+
+- `Patient.mrn`은 전부 `SYN-` 접두사 (`SYN-0001` ~ `SYN-0010`)
+- `User.email`은 전부 `@example.test` 도메인(IANA가 테스트용으로 예약한 TLD)
+- `Patient`/`User.full_name`은 전부 "합성"이 포함된 placeholder 이름 (예: `합성환자-내분비01`)
+- 진단·진료기록 등 임상 텍스트에는 필요한 경우 "(합성 데이터)" 표시를 붙임
+- 주민등록번호 등 실제 개인식별번호 필드는 스키마에도, seed 데이터에도 없음
+- `User.hashed_password`는 실제 비밀번호 해시가 아니라 인증에 쓰일 수 없는
+  명백한 placeholder 문자열이다(`SEED_PLACEHOLDER_NOT_A_REAL_HASH__...`).
+  실제 비밀번호 해시는 로그인 기능을 구현하는 후속 Task에서 처리한다.
+
+실행 방법 (idempotent — 여러 번 실행해도 중복 생성되지 않음):
+
+```
+cd backend
+python -m scripts.seed_synthetic_data
+```
