@@ -1942,12 +1942,14 @@ git commit -m "feat: list assigned patients for doctor/nurse dashboard"
 - Modify: `frontend/src/App.tsx`
 
 **Interfaces:**
-- Consumes: `can_access_patient` (Task 5), `Encounter`/`Diagnosis`/`LabResult`/`Prescription`/`ClinicalNote` (Task 3)
-- Produces: `GET /patients/{patient_id}/timeline` → `TimelineResponse { encounters: list[EncounterDetail] }`, each `EncounterDetail` bundling its diagnoses/lab_results/prescriptions/notes ordered by time — consumed directly by Task 9 (abnormal flag is already on `LabResult.is_abnormal` from Task 3, this task just surfaces it) and by the frontend timeline page.
+- Consumes: `can_access_patient` (Task 5), `require_roles` (Task 5), `Encounter`/`Diagnosis`/`LabResult`/`Prescription`/`ClinicalNote` (Task 3)
+- Produces: `GET /patients/{patient_id}/timeline` (**DOCTOR-only** — not NURSE, per this session's explicit re-specification) → `PatientTimelineOut { patient, timeline: list[TimelineItemOut] }`, a **flat** list with a 5-way `event_type` discriminator (`ENCOUNTER`/`DIAGNOSIS`/`LAB_RESULT`/`PRESCRIPTION`/`CLINICAL_NOTE`), sorted newest-first — replaces the nested-by-encounter `TimelineResponse{encounters}` shape sketched below entirely. Consumed by the frontend timeline page; Task 9's abnormal flag is surfaced inside each `LAB_RESULT` item's `summary` text rather than a separate boolean field.
 
-- [ ] **Step 1: Write the failing test**
+> **Superseded in full by this session's detailed Task 8 re-specification** (delivered across several messages after the original instruction kept getting truncated in transit). Every part of the sketch below — the nested `EncounterDetail` response shape, the lack of an `event_type` field, the missing 404-for-nonexistent-patient case, the single-key ascending sort, allowing any authenticated role through `can_access_patient` alone — was replaced. See the Task 8 completion report for the full design (field-by-field `title`/`summary` mapping per event type, the exact sort key, and real-Postgres verification for all 3 departments including the IDOR check and IDOR-via-URL-manipulation cases).
 
-`backend/tests/test_encounters.py`
+- [x] **Step 1: Write the failing test**
+
+`backend/tests/test_encounters.py` (원래 계획의 스케치 — 실제로는 위 설명대로 전면 대체됨)
 ```python
 from fastapi.testclient import TestClient
 
@@ -1991,12 +1993,14 @@ def test_unassigned_doctor_gets_403_on_timeline(db_session, override_get_db):
     assert response.status_code == 403
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && pytest tests/test_encounters.py -v`
 Expected: FAIL — `404 Not Found`
 
-- [ ] **Step 3: Implement the endpoint**
+> Actual: matched (18 of 19 failed with 404, the sort-order test failed on a KeyError since the response shape doesn't exist yet — same "not implemented" class).
+
+- [x] **Step 3: Implement the endpoint**
 
 `backend/app/schemas/encounter.py`
 ```python
@@ -2116,12 +2120,14 @@ from app.routers import auth, patients, encounters
 app.include_router(encounters.router)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && pytest tests/test_encounters.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Build the frontend timeline page**
+> Actual: 19 passed (this session's expanded suite, not the sketch's 2). Full backend suite: 77 passed (up from Task 7's 58).
+
+- [x] **Step 5: Build the frontend timeline page**
 
 `frontend/src/pages/PatientTimelinePage.tsx`
 ```tsx
@@ -2186,17 +2192,21 @@ import PatientTimelinePage from "./pages/PatientTimelinePage";
 <Route path="/doctor/patients/:patientId" element={<PatientTimelinePage />} />
 ```
 
-- [ ] **Step 6: Manual verification**
+- [x] **Step 6: Manual verification**
 
 Log in as doctor, click the patient link from the dashboard
 Expected: timeline shows the E11.9 diagnosis and the HbA1c result highlighted in red with "⚠ 이상범위"
 
-- [ ] **Step 7: Commit**
+> Actual: no literal Chrome browser this session either (tool unavailable again). Verified instead with a real Python script hitting the live `backend` container: `endocrine.doctor` → `SYN-0001` → 200, all 5 event types present, HbA1c 7.2/7.8/8.1 all present in the `LAB_RESULT` summaries (abnormal ones say "- 참고범위 이탈" rather than a red-highlighted "⚠", matching this session's flat-summary design instead of the sketch's per-field red styling); `endocrine.doctor` → `SYN-0002`/`SYN-0003` (URL patient_id swapped) → 403 both; `orthopedic.doctor` → `SYN-0002` → 200; `emergency.doctor` → `SYN-0003` → 200 with Heart Rate 118 and Troponin 0.8 both present; nonexistent id → 404; `nurse1` → `SYN-0001` (their own assigned patient, but this endpoint is DOCTOR-only) → 403. `audit_logs` shows one `READ_PATIENT_TIMELINE` row per successful call above.
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/app/schemas/encounter.py backend/app/routers/encounters.py backend/app/main.py backend/tests/test_encounters.py frontend/src/pages/PatientTimelinePage.tsx frontend/src/App.tsx
 git commit -m "feat: show encounter-based clinical timeline with abnormal lab flag"
 ```
+
+> Actual commit: `734c41a` (also included `frontend/src/api/timeline.ts`, `frontend/src/pages/PatientTimelinePage.test.tsx`, and the `DoctorDashboard.tsx`/`.test.tsx` "상세보기" link addition).
 
 ---
 
