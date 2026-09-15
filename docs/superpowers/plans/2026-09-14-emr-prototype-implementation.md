@@ -989,11 +989,13 @@ git commit -m "feat: define core clinical data model and initial Alembic migrati
 
 **Interfaces:**
 - Consumes: all models from Task 3
-- Produces: `seed(session: Session) -> None` — populates 1 doctor (내분비내과), 1 nurse, 1 admin staff, 1 patient user + Patient record, 1 assignment, 1 encounter with a diagnosis/lab result(HbA1c, abnormal)/allergy/prescription, used by Task 5+ tests and by manual demo setup
+- Produces: `seed(session: Session) -> None` (idempotent, safe to call repeatedly) — populates 8 Users across all 5 roles, 10 Patients (3 detailed core scenarios across the 3 departments + 7 filler patients), PatientAssignments, and per-scenario Encounter/Diagnosis/Order/LabResult/Prescription/ClinicalNote/Allergy data — used by Task 5+ tests and by manual demo setup. Also produces `_utc(*args) -> datetime` and `_is_abnormal(value, low, high) -> bool` local helpers.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
-`backend/tests/test_seed_data.py`
+> **Superseded by this session's explicit Task 4 re-scoping** (given as a detailed standalone instruction, not the sketch below): 14 tests were written instead of this single one — covering all 5 roles, `@example.test` emails, `SYN-000N` MRNs, the 3-department core scenarios (endocrinology 3-visit rising HbA1c/glucose series, orthopedics imaging via Order+ClinicalNote, emergency vitals/priority labs), Allergy-Patient linkage, PatientAssignment, timezone-awareness (as a static source check — see Step 4's note for why), source_type distribution, idempotency on a second run, and an RRN-pattern scan for accidental real-PII-shaped strings. See `backend/tests/test_seed_data.py`. The sketch below (single doctor/patient/encounter, `@example.org` emails, real password hashing) was not implemented as written.
+
+`backend/tests/test_seed_data.py` (원래 계획의 스케치 — 실제로는 위 설명대로 대체됨)
 ```python
 from app.models import User, Patient, Encounter, LabResult, Role
 from scripts.seed_synthetic_data import seed
@@ -1021,12 +1023,16 @@ def test_seed_creates_demo_doctor_and_patient_with_abnormal_lab(db_session):
     assert abnormal_lab.is_abnormal is True
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && pytest tests/test_seed_data.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'scripts'`
 
-- [ ] **Step 3: Implement the seed script**
+> Actual: matched (`ModuleNotFoundError: No module named 'scripts.seed_synthetic_data'`), then implemented per the re-scoped requirements below.
+
+- [x] **Step 3: Implement the seed script**
+
+> **Superseded — see `backend/scripts/seed_synthetic_data.py` for what was actually built.** Key differences from the sketch below: no `app.core.security.hash_password()` call (this session's Task 4 explicitly excludes auth/password-hashing work — `hashed_password` gets an unmistakable non-functional placeholder string instead, documented in the module docstring and README); emails use `@example.test` not `@example.org`; 10 patients (3 detailed core scenarios + 7 lighter filler patients) not 1; every entity creation is gated behind `get_or_create` by natural key (`User.email` / `Patient.mrn`) for idempotency, which this sketch does not have.
 
 `backend/scripts/__init__.py`
 ```python
@@ -1171,22 +1177,28 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && pytest tests/test_seed_data.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Manual verification against real Postgres**
+> Actual: 14 passed. One real, non-app bug found and worked around along the way: SQLAlchemy 2.0's SQLite bulk multi-row insert path (`insertmanyvalues`/RETURNING) reads back naive datetimes even for columns the seed script explicitly set as timezone-aware — confirmed via direct reproduction that this is a SQLite storage/driver limitation, not a seed-script defect (real Postgres correctly preserves `timestamptz`, reconfirmed in Step 5). Fixed the *test infrastructure* (not the app) by adding `expire_on_commit=False` to `tests/conftest.py`'s session, and replaced the runtime round-trip timezone assertion with a static check that the seed script's source never constructs a bare `datetime(...)` without `tzinfo=`.
+
+- [x] **Step 5: Manual verification against real Postgres**
 
 Run: `docker compose up -d db backend && docker compose exec backend python scripts/seed_synthetic_data.py`
 Expected: prints `Synthetic data seeded.`; `psql` or any DB client shows the rows in `patients`, `users`, `encounters`, `lab_results`, `allergies`
 
-- [ ] **Step 6: Commit**
+> Actual: ran as `python -m scripts.seed_synthetic_data` from `backend/` (running the file directly put `backend/scripts/` rather than `backend/` on `sys.path`, so `app` wasn't importable). Printed the (ASCII-only, see script comment) success message. Verified via `docker exec ... psql`: 10 patients (`SYN-0001`..`SYN-0010`), 8 users across all 5 roles, 12 encounters, 12 diagnoses, 8 orders, 9 lab_results, 4 prescriptions, 6 clinical_notes, 1 allergy. `diagnosed_at`/`created_at` show a `+00` offset confirming real timezone-aware storage. Ran the script a **second** time: identical counts across every table — idempotency confirmed against the real database, not just the SQLite test fixture.
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/scripts backend/app/core/security.py backend/tests/test_seed_data.py
 git commit -m "feat: add synthetic data seed script for demo doctor/nurse/patient/encounter"
 ```
+
+> Actual commit: `6a5f271` (also included `README.md` and `backend/tests/conftest.py`; no `backend/app/core/security.py` — not created in this task, see Step 3's note).
 
 ---
 
