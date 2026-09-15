@@ -1766,12 +1766,14 @@ git commit -m "feat: add login page and role-based doctor/patient landing pages"
 - Modify: `frontend/src/pages/DoctorDashboard.tsx`
 
 **Interfaces:**
-- Consumes: `require_roles`, `get_current_user` (Task 5), `can_access_patient` (Task 5), `PatientAssignment` (Task 3)
-- Produces: `GET /patients/assigned` (role DOCTOR/NURSE) → `list[PatientSummary]`; `PatientSummary = {id, mrn, full_name, birth_date}` — consumed by Task 8's timeline page for patient selection
+- Consumes: `require_roles`, `get_current_user` (Task 5), `PatientAssignment` (Task 3). (`can_access_patient` is not used here — this endpoint's own DB-level join *is* the access filter for "which patients am I assigned to," a different question from can_access_patient's "am I allowed to touch this one specific patient_id.")
+- Produces: `GET /patients/assigned` (role DOCTOR/NURSE) → `list[AssignedPatientOut]`; `AssignedPatientOut = {id, mrn, name, birth_date, assignment_role}` (field is `name`, not `full_name`, and `assignment_role` was added — per this session's explicit Task 7 re-specification) — consumed by Task 8's timeline page for patient selection.
 
-- [ ] **Step 1: Write the failing test**
+> **Superseded in full by this session's detailed Task 7 re-specification.** Emails are `@example.test` (not `@example.org`); the response schema adds `assignment_role` and renames `full_name`→`name`; the endpoint de-duplicates multi-assignment patients and sorts by mrn; every successful call writes a `READ_ASSIGNED_PATIENTS` audit log entry (not in this sketch at all); the frontend adds loading/empty/403/generic-error states and a retry button, not just an unconditional list. 15 backend + 13 frontend tests replace the 2 sketched below. See the Task 7 completion report for the full evidence chain (including real per-role Postgres verification and why no literal Chrome browser was driven).
 
-`backend/tests/test_patients.py`
+- [x] **Step 1: Write the failing test**
+
+`backend/tests/test_patients.py` (원래 계획의 스케치 — 실제로는 위 설명대로 대체됨)
 ```python
 from fastapi.testclient import TestClient
 
@@ -1806,12 +1808,14 @@ def test_patient_role_cannot_call_assigned_endpoint(db_session, override_get_db)
     assert response.status_code == 403
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && pytest tests/test_patients.py -v`
 Expected: FAIL — `404 Not Found`
 
-- [ ] **Step 3: Implement the endpoint**
+> Actual: matched.
+
+- [x] **Step 3: Implement the endpoint**
 
 `backend/app/schemas/patient.py`
 ```python
@@ -1865,12 +1869,14 @@ app.include_router(auth.router)
 app.include_router(patients.router)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && pytest tests/test_patients.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Wire the frontend dashboard to the endpoint**
+> Actual: 13 passed (this session's expanded suite, not the sketch's 2). Full backend suite: 58 passed (up from Task 6's 45).
+
+- [x] **Step 5: Wire the frontend dashboard to the endpoint**
 
 Modify `frontend/src/pages/DoctorDashboard.tsx`:
 ```tsx
@@ -1907,17 +1913,21 @@ export default function DoctorDashboard() {
 }
 ```
 
-- [ ] **Step 6: Manual verification**
+- [x] **Step 6: Manual verification**
 
 Run frontend + backend, log in as `doctor.endo@example.org`
 Expected: dashboard lists "정환자 (SYN-0001)"
 
-- [ ] **Step 7: Commit**
+> Actual: emails/names differ per this session's re-specification. No literal Chrome browser was available this session (tool declined again), so verified instead via a real (non-mocked) Python script hitting the live `backend` container: `endocrine.doctor@example.test` → 4 patients (`SYN-0001/0004/0007/0010`), `orthopedic.doctor@example.test` → 3 (`SYN-0002/0005/0008`), `emergency.doctor@example.test` → 3 (`SYN-0003/0006/0009`), `nurse1@example.test` → 1 (`SYN-0001`), and `patient1`/`admin.staff`/`system.admin` → all `403`. `audit_logs` showed one `READ_ASSIGNED_PATIENTS` row per successful call. Frontend behavior for this exact response shape is covered by the 13 DoctorDashboard tests.
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/app/schemas/patient.py backend/app/routers/patients.py backend/app/main.py backend/tests/test_patients.py frontend/src/pages/DoctorDashboard.tsx
 git commit -m "feat: list assigned patients for doctor/nurse dashboard"
 ```
+
+> Actual commit: `05ec1b9` (also included `frontend/src/api/patients.ts` and `frontend/src/pages/DoctorDashboard.test.tsx`).
 
 ---
 
