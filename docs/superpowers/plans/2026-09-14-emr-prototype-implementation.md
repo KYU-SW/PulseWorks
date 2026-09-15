@@ -1563,20 +1563,22 @@ git commit -m "feat: add JWT login and central role/assignment-based authorizati
 ### Task 6: 의사 및 환자 기본 화면
 
 **Files:**
-- Create: `frontend/src/api/client.ts`
-- Create: `frontend/src/auth/AuthContext.tsx`
-- Create: `frontend/src/pages/LoginPage.tsx`
-- Create: `frontend/src/pages/DoctorDashboard.tsx`
-- Create: `frontend/src/pages/PatientPortalPage.tsx`
-- Modify: `frontend/src/App.tsx`
+- Create: `frontend/src/api/client.ts`, `frontend/src/auth/AuthContext.tsx`, `frontend/src/routes/ProtectedRoute.tsx`
+- Create: `frontend/src/pages/{LoginPage,DoctorDashboard,PatientPortalPage,UnsupportedRolePage}.tsx`
+- Create: `frontend/.env.example`, `frontend/src/vite-env.d.ts`, `frontend/src/test/{setup.ts,fakeJwt.ts}`
+- Create: `*.test.ts(x)` alongside each of the files above
+- Modify: `frontend/src/App.tsx`, `frontend/vite.config.ts` (adds Vitest config), `frontend/package.json` (test deps)
+- Modify (approved out-of-plan addition): `backend/app/main.py` (dev CORS), `backend/tests/test_cors.py` (new)
 
 **Interfaces:**
 - Consumes: `POST /auth/login` from Task 5
-- Produces: `useAuth()` hook exposing `{ token, role, login(email, password), logout() }`; route `/login`, `/doctor` (role=DOCTOR/NURSE), `/patient` (role=PATIENT) — Task 7's doctor dashboard content and Task 12's patient portal content are added inside these same page files, not new routes.
+- Produces: `useAuth()` hook exposing `{ isAuthenticated, role, login(email, password) -> Promise<Role>, logout() }`; `apiGet`/`apiPost` from `client.ts`; `ProtectedRoute` component; routes `/login`, `/doctor` (role=DOCTOR only — NURSE does not land here, see below), `/patient` (role=PATIENT), `/unsupported-role` (NURSE/ADMIN_STAFF/SYSTEM_ADMIN) — Task 7's doctor dashboard content and Task 12's patient portal content are added inside these same page files, not new routes.
 
-- [ ] **Step 1: Implement the API client and auth context**
+> **Superseded in full by this session's detailed Task 6 re-specification.** The sketch below (plain `token` in memory, no persistence, a single `apiPost`/`apiGet` pair with a manually-passed token, no protected routes, no tests) was not implemented as written. What was actually built: `sessionStorage`-persisted JWT (survives reload, cleared on logout/401/tab-close), a `getStoredToken`/`setStoredToken`/`clearStoredToken`-based `client.ts` that auto-attaches the Bearer header and dispatches `auth:unauthorized` on a 401, `ProtectedRoute` (unauthenticated or wrong role → `/login`), a fourth landing page `UnsupportedRolePage` for NURSE/ADMIN_STAFF/SYSTEM_ADMIN, Korean UI copy with the required synthetic-data/non-production disclaimers, a Vitest + Testing Library suite (28 tests), and — approved separately after this task's own verification surfaced it — a dev-only `CORSMiddleware` in `backend/app/main.py` (not originally in this task's file list) plus 5 backend CORS tests. See the Task 6 completion report for the full file list, design rationale, and verification evidence (including why no literal Chrome browser was driven this session).
 
-`frontend/src/api/client.ts`
+- [x] **Step 1: Implement the API client and auth context**
+
+`frontend/src/api/client.ts` (원래 계획의 스케치 — 실제로는 위 설명대로 대체됨)
 ```ts
 const BASE_URL = "http://localhost:8000";
 
@@ -1736,17 +1738,21 @@ export default function App() {
 }
 ```
 
-- [ ] **Step 2: Manual verification**
+- [x] **Step 2: Manual verification**
 
 Run: `docker compose up -d db backend` then `cd frontend && npm run dev`, open `http://localhost:5173`, log in with `doctor.endo@example.org` / `demo1234` (requires Task 4's seed to have been run against this DB)
 Expected: redirected to `/doctor` showing "의료진 대시보드"; logging in with `patient1@example.org` / `demo1234` redirects to `/patient`
 
-- [ ] **Step 3: Commit**
+> Actual: emails are `@example.test`, not `@example.org` (this session's Task 4/5 re-specification). No literal Chrome browser was available this session (the browser-automation tool was declined), so this step was verified instead via: (1) real HTTP calls to the live `backend` container for both `endocrine.doctor@example.test` and `patient1@example.test`, decoding the returned JWTs to confirm `role` is `DOCTOR`/`PATIENT` respectively; (2) CORS preflight/header checks against the same container proving a real browser's `fetch` from `http://localhost:5173` would actually be allowed through; (3) the 28 Vitest tests exercising the exact same code paths against realistic mocked responses. A real Chrome click-through, if the user wants that additional confirmation, is still open — see "발견된 문제" in the completion report.
+
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src
 git commit -m "feat: add login page and role-based doctor/patient landing pages"
 ```
+
+> Actual commit: `c4050d7` (bundled with the approved CORS fix — see `backend/app/main.py`, `backend/tests/test_cors.py` — and the Vitest/Testing Library devDependency additions).
 
 ---
 
