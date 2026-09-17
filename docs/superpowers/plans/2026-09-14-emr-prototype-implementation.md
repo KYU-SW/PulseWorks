@@ -2694,7 +2694,23 @@ git commit -m "feat: flag allergy-medication conflicts as safety alerts on presc
 
 ---
 
-### Task 11: Mock AI 요약
+### Task 11 (보고서 확장 트랙): 검사 추세 API와 그래프
+
+> 이 세션(2026-09-18)에서 EMR 프로토타입은 임상 통합 보고서(`ClinicalReport`) 기능으로 확장하기로 결정되었다. 그 결정에 따라 새 Task 번호 11부터는 보고서 확장 트랙에 재배정되며, **이 Task 11이 그 트랙의 첫 번째 작업**이다. 아래의 기존 "Task 11: Mock AI 요약"/"Task 12: 의료진 승인 및 환자 공개"는 `ClinicalReport`의 Mock AI 설명문 생성·단일 승인 흐름으로 흡수되고, "Task 14: 진료과별 설정 기반 위젯"은 보고서 템플릿과 통합될 예정이다 — 상세 재작성은 보고서 트랙의 별도 구현 계획 문서에서 다룬다(아직 작성 전). 이 문서의 기존 Task 11~15 섹션(바로 아래)은 원래 순서의 기록으로만 남겨둔다.
+
+**Files:**
+- Create: `backend/app/schemas/lab_trend.py`, `backend/tests/test_lab_trends.py`, `frontend/src/api/labTrends.ts`, `frontend/src/components/LabTrendSection.tsx`, `frontend/src/components/LabTrendSection.test.tsx`
+- Modify: `backend/app/routers/lab_trends.py`(신규), `backend/app/main.py`, `frontend/src/pages/PatientTimelinePage.tsx`, `frontend/src/pages/PatientTimelinePage.test.tsx`
+
+**Interfaces:**
+- Produces: `GET /patients/{patient_id}/lab-trends` (DOCTOR 전용, `can_access_patient()` 재검사, 미배정/미존재 동일 404) → `LabResult`를 `(test_name, unit)` 기준으로 그룹화해 측정 시각 오름차순으로 반환하고, 각 점에 `evaluate_lab_abnormal()`(Task 9) 결과의 `status`/`rule_id`를 그대로 붙인다.
+- Consumes: `evaluate_lab_abnormal()`(Task 9), `can_access_patient()`(Task 5), `write_audit_log()`.
+
+- [x] **완료** — 21개 백엔드 테스트(`test_lab_trends.py`) + 11개 프론트엔드 테스트(`LabTrendSection.test.tsx`) 전부 통과. `PatientTimelinePage.test.tsx`는 페이지가 `/timeline`과 `/lab-trends` 두 엔드포인트를 함께 호출하게 되면서 URL 기반 fetch 라우팅으로 갱신(기존 assertion 내용은 변경 없음). 그래프는 새 npm 의존성 없이 순수 SVG로 직접 구현(사유는 완료 보고서 참고). 실제 Postgres에서 SYN-0001 HbA1c 7.2/7.8/8.1·Fasting Glucose 130/145/160 오름차순, SYN-0002(정형외과) 0건, SYN-0003 Heart Rate/Troponin 각 1건(단일 카드) 확인. 모델/Migration 변경 없음(`git status backend/app/models backend/alembic` 빈 값, Alembic `d43dd2db3d92` 그대로). 상세는 이번 세션 Task 11 완료 보고서 참고.
+
+---
+
+### Task 11 (구 번호, 보고서 트랙 편입 전 원본 기록): Mock AI 요약
 
 **Files:**
 - Create: `backend/app/services/ai_summary_generator.py`
