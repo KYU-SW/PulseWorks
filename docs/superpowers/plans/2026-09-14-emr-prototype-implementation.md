@@ -2319,7 +2319,9 @@ git commit -m "feat: add reusable lab abnormal-range rule used by seed data"
 
 ### Task 10: 알레르기-처방 충돌 알림
 
-**Files:**
+> Actual files: `backend/app/services/safety_rules.py` (modified — appended `AllergyEvidence`/`AllergyConflictResult`/`check_allergy_conflict()`), `backend/app/schemas/prescription.py` (created — not `schemas/clinical.py`), `backend/app/routers/prescriptions.py` (created), `backend/app/main.py` (modified — router registration only), `backend/tests/test_allergy_conflict.py` (created, 25 tests), `backend/tests/test_prescriptions.py` (created, 27 tests). No SQLAlchemy model or Alembic migration file touched. No frontend file touched.
+
+**Files (original sketch, superseded — see note above):**
 - Modify: `backend/app/services/safety_rules.py`
 - Create: `backend/app/schemas/clinical.py`
 - Create: `backend/app/routers/prescriptions.py`
@@ -2332,7 +2334,9 @@ git commit -m "feat: add reusable lab abnormal-range rule used by seed data"
 - Consumes: `Allergy`, `Prescription`, `SafetyAlert` (Task 3), `can_access_patient` (Task 5)
 - Produces: `check_allergy_conflict(allergies: list[Allergy], medication_name: str) -> dict | None` (returns evidence dict or `None`); `POST /patients/{patient_id}/prescriptions` (role DOCTOR) → creates `Prescription`, runs the check, and if conflicting creates a `SafetyAlert` and returns it alongside the prescription — this endpoint never blocks creation (requirement: system does not auto-decide), it only surfaces the alert for the doctor to see and override or cancel manually.
 
-- [ ] **Step 1: Write the failing test (rule function)**
+> **Superseded in full by this session's detailed Task 10 re-specification** (delivered across 3 parts after the original instruction kept getting truncated in transit). Real signature: `check_allergy_conflict(allergies: list[AllergyEvidence], medication_name: str) -> AllergyConflictResult` — `AllergyEvidence` is a plain frozen dataclass (`allergy_id`, `allergy_name`), not the real SQLAlchemy `Allergy` model, so the pure function has no ORM dependency. Matching rule is a normalized (trim + collapse whitespace + case-fold) **prefix-with-word-boundary** match, not the sketch's bidirectional substring match — the substring version would have wrongly matched "Pen"/"Cillin"/"Ace" as conflicts against "Penicillin V"/"Acetaminophen"; the boundary rule correctly excludes those while still catching "Penicillin"/"Penicillin V"/"Penicillin-V". `AllergyConflictResult` is always returned (never `None`) with a `has_conflict: bool` flag, plus `rule_id`, `matched_allergy_id`/`matched_allergy_name`, `medication_name`, `priority` (`"HIGH"` or `None`), and a fixed neutral `explanation`. The endpoint additionally: re-validates `Encounter.patient_id == URL patient_id` (blocks the encounter-ID-manipulation attack the sketch didn't check), unifies unassigned/nonexistent-patient into the same Task-8-style 404, rejects client-supplied trusted fields (`patient_id`, `prescribed_by_user_id`, etc.) via Pydantic `extra="forbid"` instead of silently ignoring them, de-duplicates `SafetyAlert` creation per `(prescription_id, rule_id)` instead of creating unconditionally, and wraps Prescription+SafetyAlert+both audit logs in one transaction with an explicit rollback on any unexpected error. No frontend files were touched this session (`frontend/src/pages/PrescriptionFormPage.tsx` and the `App.tsx` route from the sketch below are explicitly out of scope for this task and remain unbuilt) — see the Task 10 completion report for the full real-Postgres verification (conflict + non-conflict + every access-control case) and the 52 new automated tests (25 pure-function + 27 API/transaction).
+
+- [ ] **Step 1: Write the failing test (rule function)** *(sketch below — superseded, see note above; actual tests are `backend/tests/test_allergy_conflict.py`, 25 tests)*
 
 `backend/tests/test_prescription_safety_alert.py`
 ```python
@@ -2366,12 +2370,14 @@ def test_non_conflicting_medication_returns_none():
     assert check_allergy_conflict(allergies, "Metformin") is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && pytest tests/test_prescription_safety_alert.py -v`
 Expected: FAIL — `ImportError: cannot import name 'check_allergy_conflict'`
 
-- [ ] **Step 3: Implement the rule function**
+> Actual: implementation and the 25-test file were authored together this session (small pure function, verified by running the full suite immediately after — all 25 passed on first run, see Step 4).
+
+- [ ] **Step 3: Implement the rule function** *(sketch below — superseded, see note above)*
 
 Modify `backend/app/services/safety_rules.py` (append):
 ```python
@@ -2398,12 +2404,14 @@ def check_allergy_conflict(allergies: list[Allergy], medication_name: str) -> di
     return None
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && pytest tests/test_prescription_safety_alert.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Write the failing test (endpoint creates SafetyAlert)**
+> Actual: `pytest tests/test_allergy_conflict.py -v` → 25 passed (word-boundary prefix match confirmed correct for every example in the Task 10 spec: Penicillin/Penicillin V/Penicillin-V conflict; Pen/Cillin/Ace/Amoxicillin do not).
+
+- [ ] **Step 5: Write the failing test (endpoint creates SafetyAlert)** *(sketch below — superseded, see note above; actual is part of `backend/tests/test_prescriptions.py`, 27 tests)*
 
 Append to `backend/tests/test_prescription_safety_alert.py`:
 ```python
@@ -2456,12 +2464,14 @@ def test_prescribing_safe_medication_creates_no_alert(db_session, override_get_d
     assert response.json()["safety_alert"] is None
 ```
 
-- [ ] **Step 6: Run test to verify it fails**
+- [x] **Step 6: Run test to verify it fails**
 
 Run: `cd backend && pytest tests/test_prescription_safety_alert.py -v`
 Expected: FAIL — `404 Not Found`
 
-- [ ] **Step 7: Implement the endpoint**
+> Actual: API test file and router were authored together this session; verified by running the full 27-test file immediately after implementation (Step 8) rather than in two separate red/green sub-steps.
+
+- [ ] **Step 7: Implement the endpoint** *(sketch below — superseded, see note above)*
 
 `backend/app/schemas/clinical.py`
 ```python
@@ -2600,12 +2610,14 @@ from app.routers import auth, patients, encounters, prescriptions
 app.include_router(prescriptions.router)
 ```
 
-- [ ] **Step 8: Run test to verify it passes**
+- [x] **Step 8: Run test to verify it passes**
 
 Run: `cd backend && pytest tests/test_prescription_safety_alert.py -v`
 Expected: PASS
 
-- [ ] **Step 9: Build the frontend prescription form**
+> Actual: `pytest tests/test_prescriptions.py -v` → 27 passed (one helper bug fixed along the way — a test-only keyword-argument collision in the test file's own `_post()` helper, not an implementation bug). Full backend suite after: 156 passed (was 104 before Task 10; +25 pure-function +27 API/transaction = +52).
+
+- [ ] **Step 9: Build the frontend prescription form** — **not done this session**, per explicit instruction ("프론트엔드 파일은 변경하지 않는다"). `frontend/src/pages/PrescriptionFormPage.tsx` and the `App.tsx` route below remain unbuilt; frontend regression only (50 Vitest tests unchanged, `npm run build` unchanged) was verified.
 
 `frontend/src/pages/PrescriptionFormPage.tsx`
 ```tsx
@@ -2669,17 +2681,16 @@ import PrescriptionFormPage from "./pages/PrescriptionFormPage";
 <Route path="/doctor/patients/:patientId/prescribe" element={<PrescriptionFormPage />} />
 ```
 
-- [ ] **Step 10: Manual verification**
+- [ ] **Step 10: Manual verification (frontend)** — **not applicable this session**; no frontend was built (see Step 9). Backend real-Postgres verification done instead (see completion report): `endocrine.doctor` → SYN-0001 → "Penicillin V" → 201, `has_conflict=true`, `priority="HIGH"`, `SafetyAlert` created with `rule_id=ALLERGY_MEDICATION_CONFLICT`/`lab_result_id=None`; same doctor → a clearly-synthetic non-conflicting medication name → 201, `has_conflict=false`, no `SafetyAlert`; `orthopedic.doctor` → SYN-0001 → 404; `patient1`/`admin.staff` → 403; SYN-0002's `encounter_id` used against SYN-0001's `patient_id` → 404 (Encounter-manipulation blocked); unassigned SYN-0002 and nonexistent patient id both → byte-identical 404 body.
 
-Log in as doctor, navigate to the prescribe page for the seeded patient, submit "Penicillin"
-Expected: red alert box shows "ALLERGY_DRUG_CONFLICT" with the recorded allergy as evidence; submitting "Metformin" shows no alert
-
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add backend/app/services/safety_rules.py backend/app/services/audit.py backend/app/schemas/clinical.py backend/app/routers/prescriptions.py backend/app/main.py backend/tests/test_prescription_safety_alert.py frontend/src/pages/PrescriptionFormPage.tsx frontend/src/App.tsx
 git commit -m "feat: flag allergy-medication conflicts as safety alerts on prescription creation"
 ```
+
+> Actual: `git add backend/app/services/safety_rules.py backend/app/schemas/prescription.py backend/app/routers/prescriptions.py backend/app/main.py backend/tests/test_allergy_conflict.py backend/tests/test_prescriptions.py` (no `services/audit.py` change — it was already correct; no frontend files — out of scope this session). See the Task 10 completion report for the exact commit hash.
 
 ---
 
