@@ -4,7 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.routers import auth, encounters, patients, prescriptions
+from app.routers import auth, encounters, lab_trends, patients, prescriptions
 
 app = FastAPI(title="EMR Prototype")
 
@@ -26,6 +26,7 @@ app.include_router(auth.router)
 app.include_router(patients.router)
 app.include_router(encounters.router)
 app.include_router(prescriptions.router)
+app.include_router(lab_trends.router)
 
 
 @app.get("/health")

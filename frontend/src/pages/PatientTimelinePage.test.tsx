@@ -36,12 +36,34 @@ const SAMPLE_TIMELINE = {
   ],
 };
 
+const EMPTY_LAB_TRENDS = { patient: SAMPLE_TIMELINE.patient, trends: [] };
+
 function mockFetchOnce(status: number, body: unknown) {
   return vi.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,
     text: async () => JSON.stringify(body),
+  });
+}
+
+// PatientTimelinePage는 /timeline과 /lab-trends 두 엔드포인트를 함께 호출하므로,
+// URL에 따라 다른 응답을 주도록 라우팅한다 — 하나의 고정 응답만 주면
+// LabTrendSection이 타임라인 바디를 받아 깨진 상태로 렌더링된다.
+function mockFetchRouter(
+  routes: Record<string, { status: number; body: unknown }>,
+  fallback: { status: number; body: unknown } = { status: 200, body: EMPTY_LAB_TRENDS }
+) {
+  return vi.fn().mockImplementation((url: unknown) => {
+    const path = String(url);
+    const match = Object.keys(routes).find((key) => path.includes(key));
+    const { status, body } = match ? routes[match] : fallback;
+    return Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    });
   });
 }
 
@@ -82,18 +104,19 @@ describe("PatientTimelinePage", () => {
 
   it("renders the patient header and the synthetic-data disclaimer on success", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
-    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_TIMELINE));
+    vi.stubGlobal("fetch", mockFetchRouter({ "/timeline": { status: 200, body: SAMPLE_TIMELINE } }));
     renderTimelinePage();
 
     expect(await screen.findByText("합성환자-내분비01")).toBeInTheDocument();
     expect(screen.getByText(/SYN-0001/)).toBeInTheDocument();
     expect(screen.getByText(/1968-04-12/)).toBeInTheDocument();
-    expect(screen.getByText(/합성\(가짜\) 교육용 데이터/)).toBeInTheDocument();
+    // LabTrendSection도 자체 합성 데이터 안내문을 갖고 있어 복수 개 존재할 수 있다.
+    expect(screen.getAllByText(/합성\(가짜\) 교육용 데이터/).length).toBeGreaterThan(0);
   });
 
   it("shows Korean labels for each event type and the lab value in the summary", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
-    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_TIMELINE));
+    vi.stubGlobal("fetch", mockFetchRouter({ "/timeline": { status: 200, body: SAMPLE_TIMELINE } }));
     renderTimelinePage();
 
     await screen.findByText("합성환자-내분비01");
@@ -106,7 +129,9 @@ describe("PatientTimelinePage", () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
     vi.stubGlobal(
       "fetch",
-      mockFetchOnce(200, { patient: SAMPLE_TIMELINE.patient, timeline: [] })
+      mockFetchRouter({
+        "/timeline": { status: 200, body: { patient: SAMPLE_TIMELINE.patient, timeline: [] } },
+      })
     );
     renderTimelinePage();
 
@@ -144,10 +169,27 @@ describe("PatientTimelinePage", () => {
 
   it("shows a generic error message with a working retry button on a server error", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ detail: "boom" }) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => SAMPLE_TIMELINE });
+    let timelineCallCount = 0;
+    const fetchMock = vi.fn().mockImplementation((url: unknown) => {
+      const path = String(url);
+      if (path.includes("/timeline")) {
+        timelineCallCount += 1;
+        const body = timelineCallCount === 1 ? { detail: "boom" } : SAMPLE_TIMELINE;
+        const status = timelineCallCount === 1 ? 500 : 200;
+        return Promise.resolve({
+          ok: status < 300,
+          status,
+          json: async () => body,
+          text: async () => JSON.stringify(body),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => EMPTY_LAB_TRENDS,
+        text: async () => JSON.stringify(EMPTY_LAB_TRENDS),
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
     renderTimelinePage();
     const user = userEvent.setup();
@@ -157,12 +199,13 @@ describe("PatientTimelinePage", () => {
     await user.click(screen.getByRole("button", { name: "다시 시도" }));
 
     expect(await screen.findByText("합성환자-내분비01")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // 타임라인 실패 + 타임라인 재시도(성공) + 검사 추세 호출 = 3회
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("has a link back to the assigned patient list", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
-    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_TIMELINE));
+    vi.stubGlobal("fetch", mockFetchRouter({ "/timeline": { status: 200, body: SAMPLE_TIMELINE } }));
     renderTimelinePage();
 
     const backLink = await screen.findByRole("link", { name: /담당 환자 목록으로 돌아가기/ });
@@ -173,7 +216,7 @@ describe("PatientTimelinePage", () => {
     const token = makeFakeJwt("DOCTOR");
     setStoredToken(token);
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_TIMELINE));
+    vi.stubGlobal("fetch", mockFetchRouter({ "/timeline": { status: 200, body: SAMPLE_TIMELINE } }));
     renderTimelinePage();
 
     await screen.findByText("합성환자-내분비01");

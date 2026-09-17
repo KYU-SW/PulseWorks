@@ -6,6 +6,7 @@ import {
   PatientTimeline,
   TimelineEventType,
 } from "../api/timeline";
+import LabTrendSection from "../components/LabTrendSection";
 
 type LoadState = "loading" | "success" | "forbidden" | "notFound" | "error";
 
@@ -89,6 +90,8 @@ export default function PatientTimelinePage() {
           <p>MRN: {data.patient.mrn}</p>
           <p>생년월일: {data.patient.birth_date}</p>
           <p>이 화면의 모든 임상 데이터는 합성(가짜) 교육용 데이터입니다.</p>
+
+          {patientId && <LabTrendSection patientId={patientId} />}
 
           {data.timeline.length === 0 && <p>표시할 타임라인 항목이 없습니다.</p>}
 
