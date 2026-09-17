@@ -39,6 +39,7 @@ from app.models import (
     SourceType,
     User,
 )
+from app.services.safety_rules import LabAbnormalStatus, evaluate_lab_abnormal
 
 # Not a real password hash — Task 5 replaces this with a real bcrypt hash of
 # DEMO_PASSWORD for every synthetic account. Kept only as the sentinel value
@@ -54,12 +55,24 @@ DEMO_PASSWORD = "demo1234"
 
 
 def _is_abnormal(value: float, reference_low: float, reference_high: float) -> bool:
-    """검사값이 참고범위를 벗어나는지 판단하는 순수 함수.
+    """LabResult.is_abnormal(boolean)에 넣을 값을 Task 9의 중앙 규칙
+    evaluate_lab_abnormal()로 계산한다 — 이 파일에 독립적인 참고범위
+    비교 로직을 두지 않는다.
 
-    이후 규칙 엔진 Task에서 app.services.safety_rules로 승격될 수 있는 로직이지만,
-    이 Task는 그 모듈을 만들지 않으므로 seed 전용 로컬 헬퍼로 둔다.
+    LOW/HIGH -> True, NORMAL -> False로 매핑한다. 이 seed 데이터의 모든
+    값은 항상 유효한 숫자이므로 UNKNOWN이 나올 일이 없지만, 혹시라도
+    UNKNOWN이 나오면(예: 앞으로 참고범위가 없는 값을 추가하는 경우) 여기서
+    조용히 True/False로 임의 변환하지 않고 즉시 예외를 던진다 — 그런 경우가
+    실제로 생기면 코드를 바꾸기 전에 먼저 보고해야 한다.
     """
-    return value < reference_low or value > reference_high
+    result = evaluate_lab_abnormal(value, reference_low, reference_high)
+    if result.status == LabAbnormalStatus.UNKNOWN:
+        raise ValueError(
+            "evaluate_lab_abnormal()이 seed 데이터에 대해 UNKNOWN을 반환했다 — "
+            "LabResult.is_abnormal(boolean)에 조용히 저장하지 않는다. "
+            "이 상황이 실제로 발생하면 코드를 임의로 바꾸지 말고 먼저 보고할 것."
+        )
+    return result.status in (LabAbnormalStatus.LOW, LabAbnormalStatus.HIGH)
 
 
 def _get_or_create_user(db: Session, email: str, **fields) -> tuple[User, bool]:
