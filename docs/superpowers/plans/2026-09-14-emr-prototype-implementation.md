@@ -2219,11 +2219,13 @@ git commit -m "feat: show encounter-based clinical timeline with abnormal lab fl
 
 **Interfaces:**
 - Consumes: `LabResult` (Task 3)
-- Produces: `evaluate_lab_abnormal(value: float, reference_low: float, reference_high: float) -> bool` — pure function; used wherever a `LabResult` is created (seed script and any future order-result entry endpoint) instead of hand-setting `is_abnormal`.
+- Produces: `evaluate_lab_abnormal(value, reference_low, reference_high, unit=None) -> LabAbnormalResult` (a frozen dataclass with `status: LabAbnormalStatus` (`LOW`/`NORMAL`/`HIGH`/`UNKNOWN`), `value`/`reference_low`/`reference_high`/`unit` (echoed back unchanged), `rule_id="LAB_REFERENCE_RANGE"`, `explanation` (one of 4 fixed, purely mechanical sentences)) — replaces the plan's boolean-returning sketch below entirely. Used by `scripts/seed_synthetic_data.py`'s `_is_abnormal()` instead of duplicating the range comparison.
 
-- [ ] **Step 1: Write the failing test**
+> **Superseded in full by this session's detailed Task 9 re-specification** (delivered across several messages after the original instruction kept getting truncated in transit). The bool-only signature, the lack of an UNKNOWN case, and modifying `app/models/clinical.py` were all replaced — this task touches no model file at all. See the Task 9 completion report for the exact UNKNOWN triggers, the fixed explanation text, and real-Postgres verification against every seeded LabResult.
 
-`backend/tests/test_lab_abnormal_flag.py`
+- [x] **Step 1: Write the failing test**
+
+`backend/tests/test_lab_abnormal_flag.py` (원래 계획의 스케치 — 실제로는 `backend/tests/test_safety_rules.py`의 20개 테스트로 전면 대체됨)
 ```python
 from app.services.safety_rules import evaluate_lab_abnormal
 
@@ -2244,12 +2246,14 @@ def test_value_at_boundary_is_not_abnormal():
     assert evaluate_lab_abnormal(value=6.0, reference_low=4.0, reference_high=6.0) is False
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && pytest tests/test_lab_abnormal_flag.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.services.safety_rules'`
 
-- [ ] **Step 3: Implement the rule**
+> Actual: matched.
+
+- [x] **Step 3: Implement the rule**
 
 `backend/app/services/safety_rules.py`
 ```python
@@ -2262,12 +2266,14 @@ def evaluate_lab_abnormal(value: float, reference_low: float, reference_high: fl
     return value < reference_low or value > reference_high
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && pytest tests/test_lab_abnormal_flag.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Use the rule in the seed script instead of a hardcoded flag**
+> Actual: 20 passed (this session's expanded suite, not the sketch's 4).
+
+- [x] **Step 5: Use the rule in the seed script instead of a hardcoded flag**
 
 Modify `backend/scripts/seed_synthetic_data.py` — replace the hardcoded `is_abnormal=True` in the `LabResult(...)` construction with a computed call:
 ```python
@@ -2291,17 +2297,23 @@ db.add(
 )
 ```
 
-- [ ] **Step 6: Run full backend test suite to confirm no regression**
+> Actual (Step 5): the seed script's pre-existing local `_is_abnormal(value, reference_low, reference_high) -> bool` helper (from Task 4) now delegates to `evaluate_lab_abnormal(...).status`, mapping `LOW`/`HIGH` → `True` and `NORMAL` → `False`; it raises (rather than silently coercing) if `UNKNOWN` is ever returned. All 5 call sites unchanged. Real-Postgres check: all 9 seeded `LabResult` rows across `SYN-0001`/`SYN-0003` resolve to `HIGH` and match the existing `is_abnormal` column exactly — no `UNKNOWN`, no result change, Seed idempotency and record counts unaffected (`test_seed_data.py`'s 14 tests still pass).
+
+- [x] **Step 6: Run full backend test suite to confirm no regression**
 
 Run: `cd backend && pytest -v`
 Expected: all tests PASS, including `test_seed_data.py::test_seed_creates_demo_doctor_and_patient_with_abnormal_lab`
 
-- [ ] **Step 7: Commit**
+> Actual: 104 passed (up from Task 8's 84; the equivalent seed test in this session's suite is `test_seed_data.py`'s `test_endocrinology_patient_has_rising_hba1c_series`, not the sketch's exact test name).
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/app/services/safety_rules.py backend/scripts/seed_synthetic_data.py backend/tests/test_lab_abnormal_flag.py
 git commit -m "feat: add reusable lab abnormal-range rule used by seed data"
 ```
+
+> Actual commit: `b45f9fd` (test file is `backend/tests/test_safety_rules.py`, not `test_lab_abnormal_flag.py`).
 
 ---
 
