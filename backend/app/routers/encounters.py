@@ -18,6 +18,7 @@ from app.models import (
 from app.schemas.encounter import PatientTimelineOut, TimelineItemOut, TimelinePatientOut
 from app.services.audit import write_audit_log
 from app.services.authorization import can_access_patient
+from app.utils.text import truncate_for_display as _truncate_for_display
 
 router = APIRouter(prefix="/patients", tags=["encounters"])
 
@@ -39,14 +40,6 @@ def _sort_key(item: TimelineItemOut) -> tuple:
     # 내림차순이 필요한 숫자/시각 필드는 음수로 뒤집어 하나의 오름차순 정렬로
     # 처리한다 — 동일 시각이라도 항상 같은 순서가 되도록 결정적이다.
     return (-item.event_time.timestamp(), -item.encounter_id, item.event_type, -item.id)
-
-
-def _truncate_for_display(text: str, limit: int = 300) -> str:
-    """단순 표시용 길이 제한 — AI 요약이 아니다. 원문이 limit자 이하면
-    그대로 반환하고, 넘으면 앞부분만 잘라 말줄임(...)을 붙인다."""
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "..."
 
 
 @router.get("/{patient_id}/timeline", response_model=PatientTimelineOut)

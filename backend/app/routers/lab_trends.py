@@ -12,7 +12,7 @@ from app.schemas.lab_trend import (
 )
 from app.services.audit import write_audit_log
 from app.services.authorization import can_access_patient
-from app.services.safety_rules import evaluate_lab_abnormal
+from app.services.lab_trend_grouping import group_lab_results_by_test
 
 router = APIRouter(prefix="/patients", tags=["lab_trends"])
 
@@ -49,31 +49,27 @@ def get_patient_lab_trends(
         else []
     )
 
-    groups: dict[tuple[str, str], list[LabResult]] = {}
-    for lab in lab_results:
-        groups.setdefault((lab.test_name, lab.unit), []).append(lab)
-
-    trends: list[LabTrendGroupOut] = []
-    for (test_name, unit), labs in sorted(groups.items(), key=lambda item: item[0]):
-        points = []
-        for lab in sorted(labs, key=lambda lab: lab.measured_at):
-            judgment = evaluate_lab_abnormal(
-                lab.value, lab.reference_low, lab.reference_high, lab.unit
-            )
-            points.append(
+    trends: list[LabTrendGroupOut] = [
+        LabTrendGroupOut(
+            test_name=group.test_name,
+            unit=group.unit,
+            points=[
                 LabTrendPointOut(
-                    value=lab.value,
-                    unit=lab.unit,
-                    reference_low=lab.reference_low,
-                    reference_high=lab.reference_high,
-                    measured_at=lab.measured_at,
-                    status=judgment.status.value,
-                    rule_id=judgment.rule_id,
-                    encounter_id=lab.encounter_id,
-                    source_type=lab.source_type.value,
+                    value=point.value,
+                    unit=point.unit,
+                    reference_low=point.reference_low,
+                    reference_high=point.reference_high,
+                    measured_at=point.measured_at,
+                    status=point.status,
+                    rule_id=point.rule_id,
+                    encounter_id=point.encounter_id,
+                    source_type=point.source_type,
                 )
-            )
-        trends.append(LabTrendGroupOut(test_name=test_name, unit=unit, points=points))
+                for point in group.points
+            ],
+        )
+        for group in group_lab_results_by_test(lab_results)
+    ]
 
     write_audit_log(
         db,
