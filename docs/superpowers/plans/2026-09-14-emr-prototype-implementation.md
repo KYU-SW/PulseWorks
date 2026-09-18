@@ -2710,6 +2710,21 @@ git commit -m "feat: flag allergy-medication conflicts as safety alerts on presc
 
 ---
 
+### Task 12 (보고서 확장 트랙): 보고서 데이터 수집 서비스
+
+**Files:**
+- Create: `backend/app/services/report_data.py`, `backend/app/services/lab_trend_grouping.py`(Task 11 그룹화 로직 공용화), `backend/app/utils/text.py`(Task 8 `_truncate_for_display()` 공용화), `backend/tests/test_report_data.py`
+- Modify: `backend/app/routers/encounters.py`(공용 함수 재사용으로 축소), `backend/app/routers/lab_trends.py`(공용 그룹화 함수 재사용으로 축소)
+- 신규 라우터/모델/Migration/프론트엔드 없음 — 이 서비스는 아직 HTTP로 노출되지 않는다(Task 13에서 라우터가 이 함수를 호출할 때 노출).
+
+**Interfaces:**
+- Produces: `collect_report_data(db, patient_id, encounter_ids: list[int]) -> ReportData` — 읽기 전용(commit/flush/add/HTTPException 없음). `encounter_ids`가 비었거나 존재하지 않거나 다른 환자에 속하면 `ReportScopeError`(일반 Exception, HTTPException 아님)를 던지고 부분 데이터를 반환하지 않는다.
+- Consumes: `evaluate_lab_abnormal()`(Task 9), `group_lab_results_by_test()`(Task 11에서 추출), `truncate_for_display()`(Task 8에서 추출).
+
+- [x] **완료** — 24개 신규 테스트(`test_report_data.py`) 전부 통과, Task 8/11 추출 리팩터링 후 기존 47개(`test_encounters.py`+`test_lab_trends.py`) 무회귀. backend 전체 201 passed(기존 177 + 24). 실제 Postgres에서 SYN-0001 첫 Encounter로 진단/검사/처방/알레르기/SafetyAlert/진료기록미리보기/`source_record_ids`를 정확히 수집하고, SYN-0002의 Encounter를 SYN-0001의 patient_id와 함께 넘기면 `ReportScopeError`로 전체 실패함을 확인(부분 반환 없음). 모델/Migration 변경 없음. 상세는 이번 세션 Task 12 완료 보고서 참고.
+
+---
+
 ### Task 11 (구 번호, 보고서 트랙 편입 전 원본 기록): Mock AI 요약
 
 **Files:**
