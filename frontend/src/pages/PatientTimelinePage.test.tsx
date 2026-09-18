@@ -81,6 +81,7 @@ function renderTimelinePage(patientId = "1") {
             }
           />
           <Route path="/doctor" element={<div>DOCTOR_DASHBOARD_SCREEN</div>} />
+          <Route path="/doctor/reports/:reportId" element={<div>REPORT_PREVIEW_SCREEN</div>} />
           <Route path="/login" element={<div>LOGIN_SCREEN</div>} />
         </Routes>
       </MemoryRouter>
@@ -225,5 +226,203 @@ describe("PatientTimelinePage", () => {
       expect(call.map(String).join(" ")).not.toContain(token);
     }
     consoleSpy.mockRestore();
+  });
+
+  const SAMPLE_REPORT = {
+    id: 42, patient_id: 1, encounter_id: 1, report_type: "DOCTOR_REFERENCE",
+    scope_type: "SINGLE_ENCOUNTER", scope_encounter_ids: [1], status: "DRAFT",
+    content: {
+      emr_snapshot: {
+        patient: SAMPLE_TIMELINE.patient, encounters: [], diagnoses: [], lab_results: [],
+        lab_trends: [], prescriptions: [], allergies: [], safety_alerts: [],
+        clinical_notes: [], source_record_ids: [],
+      },
+      narrative: null, handoff_note: null, patient_guidance: null,
+    },
+    created_by_user_id: 1, created_at: "2026-09-18T00:00:00Z",
+    last_modified_by_user_id: 1, last_modified_at: "2026-09-18T00:00:00Z",
+    reviewed_by_user_id: null, reviewed_at: null, supersedes_report_id: null,
+  };
+
+  // 9. 각 Encounter에 보고서 생성 버튼 표시
+  it("shows a report-generation button for each ENCOUNTER item", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchRouter({ "/timeline": { status: 200, body: SAMPLE_TIMELINE } }));
+    renderTimelinePage();
+
+    expect(
+      await screen.findByRole("button", { name: "이 방문으로 진료참고 보고서 생성" })
+    ).toBeInTheDocument();
+  });
+
+  // 10, 11, 12. 버튼 클릭 시 해당 Encounter ID/현재 patientId 사용, 허용 필드만 전송
+  it("posts only the allowed fields using the current patientId and the clicked encounter's id", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = mockFetchRouter({
+      "/timeline": { status: 200, body: SAMPLE_TIMELINE },
+      "/reports": { status: 201, body: SAMPLE_REPORT },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderTimelinePage("1");
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: "이 방문으로 진료참고 보고서 생성" });
+    await user.click(button);
+
+    const postCall = fetchMock.mock.calls.find((call: any[]) =>
+      String(call[0]).includes("/reports")
+    );
+    expect(postCall).toBeDefined();
+    expect(String(postCall![0])).toContain("/patients/1/reports");
+    const body = JSON.parse(postCall![1].body);
+    expect(body).toEqual({
+      report_type: "DOCTOR_REFERENCE",
+      scope_type: "SINGLE_ENCOUNTER",
+      encounter_ids: [1], // SAMPLE_TIMELINE의 ENCOUNTER 항목의 encounter_id
+    });
+    expect(Object.keys(body)).toEqual(["report_type", "scope_type", "encounter_ids"]);
+  });
+
+  // 13 & 14. 요청 중 버튼 disabled, 중복 클릭 방지
+  it("disables the button while the request is in flight and ignores extra clicks", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    let resolvePost: (value: unknown) => void = () => {};
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options: RequestInit) => {
+      const path = String(url);
+      if (path.includes("/reports") && options?.method === "POST") {
+        return new Promise((resolve) => {
+          resolvePost = resolve;
+        });
+      }
+      if (path.includes("/timeline")) {
+        return Promise.resolve({
+          ok: true, status: 200, json: async () => SAMPLE_TIMELINE, text: async () => "",
+        });
+      }
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => EMPTY_LAB_TRENDS, text: async () => "",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderTimelinePage();
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: "이 방문으로 진료참고 보고서 생성" });
+    await user.click(button);
+
+    expect(await screen.findByRole("button", { name: "보고서를 생성하는 중..." })).toBeDisabled();
+
+    const postCallsBeforeSecondClick = fetchMock.mock.calls.filter((call: any[]) =>
+      String(call[0]).includes("/reports")
+    ).length;
+    await user.click(screen.getByRole("button", { name: "보고서를 생성하는 중..." }));
+    const postCallsAfterSecondClick = fetchMock.mock.calls.filter((call: any[]) =>
+      String(call[0]).includes("/reports")
+    ).length;
+    expect(postCallsAfterSecondClick).toBe(postCallsBeforeSecondClick); // 추가 호출 없음
+
+    resolvePost({ ok: true, status: 201, json: async () => SAMPLE_REPORT, text: async () => "" });
+  });
+
+  // 15. 201 성공 시 보고서 페이지 이동
+  it("navigates to the report preview page on a 201 response", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRouter({
+        "/timeline": { status: 200, body: SAMPLE_TIMELINE },
+        "/reports": { status: 201, body: SAMPLE_REPORT },
+      })
+    );
+    renderTimelinePage();
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: "이 방문으로 진료참고 보고서 생성" });
+    await user.click(button);
+
+    expect(await screen.findByText("REPORT_PREVIEW_SCREEN")).toBeInTheDocument();
+  });
+
+  // 16. 200 성공 시 같은 방식으로 이동
+  it("navigates to the report preview page on a 200 (reused DRAFT) response the same way", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRouter({
+        "/timeline": { status: 200, body: SAMPLE_TIMELINE },
+        "/reports": { status: 200, body: SAMPLE_REPORT },
+      })
+    );
+    renderTimelinePage();
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: "이 방문으로 진료참고 보고서 생성" });
+    await user.click(button);
+
+    expect(await screen.findByText("REPORT_PREVIEW_SCREEN")).toBeInTheDocument();
+  });
+
+  // 17 & 18. 생성 실패 시 일반 오류 안내, 실패 후 버튼 다시 사용 가능
+  it("shows a generic error and re-enables the button when report creation fails", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRouter({
+        "/timeline": { status: 200, body: SAMPLE_TIMELINE },
+        "/reports": { status: 500, body: { detail: "boom" } },
+      })
+    );
+    renderTimelinePage();
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: "이 방문으로 진료참고 보고서 생성" });
+    await user.click(button);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("보고서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    expect(
+      screen.getByRole("button", { name: "이 방문으로 진료참고 보고서 생성" })
+    ).not.toBeDisabled();
+  });
+
+  // 19. 401 전역 로그인 이동 유지
+  it("follows the existing global 401 flow when report creation returns 401", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRouter({
+        "/timeline": { status: 200, body: SAMPLE_TIMELINE },
+        "/reports": { status: 401, body: { detail: "Invalid token" } },
+      })
+    );
+    renderTimelinePage();
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: "이 방문으로 진료참고 보고서 생성" });
+    await user.click(button);
+
+    await waitFor(() => expect(screen.getByText("LOGIN_SCREEN")).toBeInTheDocument());
+  });
+
+  // 20. 다른 환자 ID를 요청하지 않음
+  it("only ever requests the current page's patientId, never another one", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = mockFetchRouter({
+      "/timeline": { status: 200, body: SAMPLE_TIMELINE },
+      "/reports": { status: 201, body: SAMPLE_REPORT },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderTimelinePage("7");
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: "이 방문으로 진료참고 보고서 생성" });
+    await user.click(button);
+
+    const postCall = fetchMock.mock.calls.find((call: any[]) =>
+      String(call[0]).includes("/reports")
+    );
+    expect(postCall).toBeDefined();
+    expect(String(postCall![0])).toContain("/patients/7/reports");
+    expect(String(postCall![0])).not.toContain("/patients/1/reports");
   });
 });

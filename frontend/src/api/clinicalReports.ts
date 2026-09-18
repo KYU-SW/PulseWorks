@@ -1,6 +1,7 @@
 // backend/app/schemas/clinical_report.py의 Pydantic 스키마와 정확히
-// 일치해야 하는 타입만 정의한다. GET /reports/{report_id} 호출 함수는
-// Task 15에서 추가한다 — 이번 Task는 타입만 다룬다.
+// 일치해야 하는 타입.
+
+import { apiGet, apiPost } from "./client";
 
 export type SnapshotPatient = {
   id: number;
@@ -134,3 +135,24 @@ export type ClinicalReportOut = {
   reviewed_at: string | null;
   supersedes_report_id: number | null;
 };
+
+export type ClinicalReportCreateRequest = {
+  report_type: "DOCTOR_REFERENCE";
+  scope_type: "SINGLE_ENCOUNTER";
+  encounter_ids: number[];
+};
+
+// 백엔드는 신규 생성 시 201, 기존 DRAFT 재사용 시 200을 반환하지만
+// client.ts의 apiPost()는 두 상태 모두 response.ok(2xx)로 성공 처리해
+// 파싱된 본문을 그대로 반환한다 — 별도 분기 없이 두 경우 다 성공으로
+// 다룰 수 있다.
+export function createClinicalReport(
+  patientId: string | number,
+  request: ClinicalReportCreateRequest
+): Promise<ClinicalReportOut> {
+  return apiPost<ClinicalReportOut>(`/patients/${patientId}/reports`, request);
+}
+
+export function getClinicalReport(reportId: string | number): Promise<ClinicalReportOut> {
+  return apiGet<ClinicalReportOut>(`/reports/${reportId}`);
+}

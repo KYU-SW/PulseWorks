@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/client";
+import { createClinicalReport } from "../api/clinicalReports";
 import {
   getPatientTimeline,
   PatientTimeline,
@@ -25,9 +26,51 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
 
 export default function PatientTimelinePage() {
   const { patientId } = useParams();
+  const navigate = useNavigate();
   const [data, setData] = useState<PatientTimeline | null>(null);
   const [state, setState] = useState<LoadState>("loading");
   const hasFetchedRef = useRef(false);
+  // Encounter별로 독립적인 진행 상태를 추적한다 — 한 Encounter의 요청이
+  // 진행 중이어도 다른 Encounter의 버튼은 막지 않는다.
+  const [creatingEncounterIds, setCreatingEncounterIds] = useState<Set<number>>(new Set());
+  const [reportError, setReportError] = useState<string | null>(null);
+
+  async function handleCreateReport(encounterId: number) {
+    if (!patientId || creatingEncounterIds.has(encounterId)) return; // 중복 클릭 방지
+    setReportError(null);
+    setCreatingEncounterIds((prev) => new Set(prev).add(encounterId));
+
+    try {
+      const report = await createClinicalReport(patientId, {
+        report_type: "DOCTOR_REFERENCE",
+        scope_type: "SINGLE_ENCOUNTER",
+        encounter_ids: [encounterId],
+      });
+      // 201(신규 생성)과 200(기존 DRAFT 재사용) 모두 동일하게 성공 처리하고
+      // 같은 미리보기 페이지로 이동한다 — 오류 상태를 남기지 않는다.
+      navigate(`/doctor/reports/${report.id}`);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 401) return; // client.ts가 전역 로그아웃 처리
+        if (err.status === 403) {
+          setReportError("보고서를 생성할 권한이 없습니다.");
+        } else if (err.status === 404) {
+          setReportError("환자 또는 보고서 범위를 찾을 수 없거나 조회할 수 없습니다.");
+        } else if (err.status === 422) {
+          setReportError("선택한 방문으로 보고서를 생성할 수 없습니다.");
+        } else {
+          setReportError("보고서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        }
+      } else {
+        setReportError("보고서를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+      setCreatingEncounterIds((prev) => {
+        const next = new Set(prev);
+        next.delete(encounterId);
+        return next; // 실패 시에만 버튼을 다시 활성화한다 — 성공 시엔 페이지 이동
+      });
+    }
+  }
 
   async function loadTimeline() {
     if (!patientId) return;
@@ -93,24 +136,40 @@ export default function PatientTimelinePage() {
 
           {patientId && <LabTrendSection patientId={patientId} />}
 
+          {reportError && <p role="alert">{reportError}</p>}
+
           {data.timeline.length === 0 && <p>표시할 타임라인 항목이 없습니다.</p>}
 
           {data.timeline.length > 0 && (
             <ul>
-              {data.timeline.map((item) => (
-                <li key={`${item.event_type}-${item.id}`}>
-                  <span>{new Date(item.event_time).toLocaleString()}</span>{" — "}
-                  <strong>{EVENT_TYPE_LABELS[item.event_type]}</strong>{" — "}
-                  <span>{item.title}</span>{" — "}
-                  <span>{item.summary}</span>{" — "}
-                  <span>{item.department}</span>{" — "}
-                  <span>
-                    {item.source_type
-                      ? SOURCE_TYPE_LABELS[item.source_type] ?? item.source_type
-                      : "-"}
-                  </span>
-                </li>
-              ))}
+              {data.timeline.map((item) => {
+                const isCreating = creatingEncounterIds.has(item.encounter_id);
+                return (
+                  <li key={`${item.event_type}-${item.id}`}>
+                    <span>{new Date(item.event_time).toLocaleString()}</span>{" — "}
+                    <strong>{EVENT_TYPE_LABELS[item.event_type]}</strong>{" — "}
+                    <span>{item.title}</span>{" — "}
+                    <span>{item.summary}</span>{" — "}
+                    <span>{item.department}</span>{" — "}
+                    <span>
+                      {item.source_type
+                        ? SOURCE_TYPE_LABELS[item.source_type] ?? item.source_type
+                        : "-"}
+                    </span>
+                    {item.event_type === "ENCOUNTER" && (
+                      <>
+                        {" — "}
+                        <button
+                          onClick={() => handleCreateReport(item.encounter_id)}
+                          disabled={isCreating}
+                        >
+                          {isCreating ? "보고서를 생성하는 중..." : "이 방문으로 진료참고 보고서 생성"}
+                        </button>
+                      </>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
