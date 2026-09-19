@@ -1,7 +1,14 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { setStoredToken } from "./client";
 import { makeFakeJwt } from "../test/fakeJwt";
-import { createClinicalReport, generateReportNarrative, getClinicalReport } from "./clinicalReports";
+import {
+  approveClinicalReport,
+  createClinicalReport,
+  generateReportNarrative,
+  getClinicalReport,
+  patchClinicalReport,
+  rejectClinicalReport,
+} from "./clinicalReports";
 
 const SAMPLE_REPORT = {
   id: 1,
@@ -163,4 +170,61 @@ it("posts to /reports/{report_id}/generate-narrative and returns the updated rep
   expect(String(url)).toContain("/reports/1/generate-narrative");
   expect(options.method).toBe("POST");
   expect(report.content.narrative).toBe("생성된 설명문");
+});
+
+// patchClinicalReport(): 올바른 PATCH URL/메서드/본문
+it("sends a PATCH with exactly the given fields", async () => {
+  setStoredToken(makeFakeJwt("DOCTOR"));
+  const patched = {
+    ...SAMPLE_REPORT,
+    content: { ...SAMPLE_REPORT.content, narrative: "수정된 설명" },
+  };
+  const fetchMock = mockFetchOnce(200, patched);
+  vi.stubGlobal("fetch", fetchMock);
+
+  const report = await patchClinicalReport(1, {
+    narrative: "수정된 설명",
+    handoff_note: null,
+    patient_guidance: null,
+  });
+
+  const [url, options] = fetchMock.mock.calls[0];
+  expect(String(url)).toContain("/reports/1");
+  expect(options.method).toBe("PATCH");
+  expect(JSON.parse(options.body)).toEqual({
+    narrative: "수정된 설명",
+    handoff_note: null,
+    patient_guidance: null,
+  });
+  expect(report.content.narrative).toBe("수정된 설명");
+});
+
+// approveClinicalReport(): 올바른 POST URL
+it("posts to /reports/{report_id}/approve", async () => {
+  setStoredToken(makeFakeJwt("DOCTOR"));
+  const approved = { ...SAMPLE_REPORT, status: "APPROVED" };
+  const fetchMock = mockFetchOnce(200, approved);
+  vi.stubGlobal("fetch", fetchMock);
+
+  const report = await approveClinicalReport(1);
+
+  const [url, options] = fetchMock.mock.calls[0];
+  expect(String(url)).toContain("/reports/1/approve");
+  expect(options.method).toBe("POST");
+  expect(report.status).toBe("APPROVED");
+});
+
+// rejectClinicalReport(): 올바른 POST URL
+it("posts to /reports/{report_id}/reject", async () => {
+  setStoredToken(makeFakeJwt("DOCTOR"));
+  const rejected = { ...SAMPLE_REPORT, status: "REJECTED" };
+  const fetchMock = mockFetchOnce(200, rejected);
+  vi.stubGlobal("fetch", fetchMock);
+
+  const report = await rejectClinicalReport(1);
+
+  const [url, options] = fetchMock.mock.calls[0];
+  expect(String(url)).toContain("/reports/1/reject");
+  expect(options.method).toBe("POST");
+  expect(report.status).toBe("REJECTED");
 });

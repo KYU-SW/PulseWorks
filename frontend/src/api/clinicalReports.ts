@@ -1,7 +1,7 @@
 // backend/app/schemas/clinical_report.py의 Pydantic 스키마와 정확히
 // 일치해야 하는 타입.
 
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPatch, apiPost } from "./client";
 
 export type SnapshotPatient = {
   id: number;
@@ -163,4 +163,30 @@ export function getClinicalReport(reportId: string | number): Promise<ClinicalRe
 // 반환한다(멱등) — 강제 재생성 API는 없다.
 export function generateReportNarrative(reportId: string | number): Promise<ClinicalReportOut> {
   return apiPost<ClinicalReportOut>(`/reports/${reportId}/generate-narrative`, {});
+}
+
+// 세 서술형 필드 중 실제로 넘긴 것만 백엔드가 반영한다(model_fields_set
+// 기준) — 이 타입에서 세 필드를 전부 선택적(optional)으로 둔 것도 그
+// 구분을 그대로 표현하기 위해서다. 프론트는 항상 세 필드를 함께
+// 보내도록 설계하지만(저장 버튼 하나로 통합 제출), 타입 자체는 부분
+// 업데이트도 표현할 수 있어야 한다.
+export type ClinicalReportPatchRequest = {
+  narrative?: string | null;
+  handoff_note?: string | null;
+  patient_guidance?: string | null;
+};
+
+export function patchClinicalReport(
+  reportId: string | number,
+  request: ClinicalReportPatchRequest
+): Promise<ClinicalReportOut> {
+  return apiPatch<ClinicalReportOut>(`/reports/${reportId}`, request);
+}
+
+export function approveClinicalReport(reportId: string | number): Promise<ClinicalReportOut> {
+  return apiPost<ClinicalReportOut>(`/reports/${reportId}/approve`, {});
+}
+
+export function rejectClinicalReport(reportId: string | number): Promise<ClinicalReportOut> {
+  return apiPost<ClinicalReportOut>(`/reports/${reportId}/reject`, {});
 }

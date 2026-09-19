@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, apiGet, apiPost, clearStoredToken, setStoredToken } from "./client";
+import { ApiError, apiGet, apiPatch, apiPost, clearStoredToken, setStoredToken } from "./client";
 
 function mockFetchOnce(status: number, body: unknown) {
   return vi.fn().mockResolvedValue({
@@ -63,5 +63,18 @@ describe("api client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(apiGet("/whatever")).rejects.toMatchObject({ status: 500, message: "boom" });
+  });
+
+  it("sends a PATCH request with a JSON body and the Bearer token", async () => {
+    setStoredToken("test-token-value");
+    const fetchMock = mockFetchOnce(200, { ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await apiPatch("/reports/1", { narrative: "x" });
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.method).toBe("PATCH");
+    expect(JSON.parse(options.body)).toEqual({ narrative: "x" });
+    expect(options.headers.Authorization).toBe("Bearer test-token-value");
   });
 });

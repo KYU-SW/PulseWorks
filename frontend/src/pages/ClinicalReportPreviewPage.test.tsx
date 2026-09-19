@@ -291,14 +291,14 @@ describe("ClinicalReportPreviewPage", () => {
     expect(link).toHaveAttribute("href", "/doctor");
   });
 
-  // 40. 수정·승인·반려·PDF 버튼 없음
-  it("never renders edit, approve, reject, or PDF buttons", async () => {
+  // 40. Word·PDF 출력 버튼은 여전히 없음(수정·승인·반려는 Task 17에서 추가됨)
+  it("never renders Word or PDF export buttons", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
     vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
     renderPreviewPage();
 
     await screen.findByText("진료참고 보고서");
-    for (const forbiddenName of [/수정/, /승인/, /반려/, /PDF/, /다운로드/]) {
+    for (const forbiddenName of [/PDF/, /다운로드/, /Word/]) {
       expect(screen.queryByRole("button", { name: forbiddenName })).not.toBeInTheDocument();
     }
   });
@@ -361,7 +361,8 @@ describe("ClinicalReportPreviewPage", () => {
 
     await screen.findByText("진료참고 보고서");
     expect(screen.queryByRole("button", { name: "Mock 설명문 생성" })).not.toBeInTheDocument();
-    expect(screen.getByText("이미 생성된 설명문입니다.")).toBeInTheDocument();
+    // DRAFT에서는 narrative가 편집 가능한 textarea에 표시된다(Task 17).
+    expect(screen.getByDisplayValue("이미 생성된 설명문입니다.")).toBeInTheDocument();
   });
 
   it("disables the button while generating, prevents duplicate clicks, and updates in place on success", async () => {
@@ -380,8 +381,7 @@ describe("ClinicalReportPreviewPage", () => {
 
     // 생성 중에는 버튼이 비활성화되고 문구가 바뀐다(요청이 동기적으로
     // 즉시 끝나므로 최종 성공 상태까지 함께 확인한다).
-    await screen.findByText("Mock 설명문 초안");
-    expect(screen.getByText("생성된 Mock 설명문 초안입니다.")).toBeInTheDocument();
+    await screen.findByDisplayValue("생성된 Mock 설명문 초안입니다.");
     expect(screen.queryByRole("button", { name: "Mock 설명문 생성" })).not.toBeInTheDocument();
 
     const postCalls = fetchMock.mock.calls.filter(
@@ -406,14 +406,251 @@ describe("ClinicalReportPreviewPage", () => {
     expect(screen.getByRole("button", { name: "Mock 설명문 생성" })).not.toBeDisabled();
   });
 
-  it("never renders the generation button as an edit, approve, reject, or PDF action", async () => {
+  it("never renders the generation button as a PDF or Word export action", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
     vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
     renderPreviewPage();
 
     await screen.findByRole("button", { name: "Mock 설명문 생성" });
-    for (const forbiddenName of [/수정/, /승인/, /반려/, /PDF/, /다운로드/]) {
+    for (const forbiddenName of [/PDF/, /다운로드/, /Word/]) {
       expect(screen.queryByRole("button", { name: forbiddenName })).not.toBeInTheDocument();
+    }
+  });
+
+  // ======================= Task 17: 수정·승인·반려 =========================
+
+  it("shows editable textareas for DRAFT, pre-filled with null as empty", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
+    renderPreviewPage();
+
+    await screen.findByText("진료참고 보고서");
+    expect(screen.getByLabelText("설명문")).toHaveValue("");
+    expect(screen.getByLabelText("인수인계 메모")).toHaveValue("");
+    expect(screen.getByLabelText("환자 안내문")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "저장" })).toBeInTheDocument();
+  });
+
+  it("shows approve and reject buttons only for DRAFT", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
+    renderPreviewPage();
+
+    await screen.findByText("진료참고 보고서");
+    expect(screen.getByRole("button", { name: "승인" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "반려" })).toBeInTheDocument();
+  });
+
+  it("saves all three fields together and updates in place without a full reload", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const patchedReport = {
+      ...SAMPLE_REPORT,
+      content: {
+        ...SAMPLE_REPORT.content,
+        narrative: "의사가 작성한 설명",
+        handoff_note: "인수인계 메모 내용",
+      },
+    };
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      const isPatch = options?.method === "PATCH";
+      const body = isPatch ? patchedReport : SAMPLE_REPORT;
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.type(screen.getByLabelText("설명문"), "의사가 작성한 설명");
+    await user.type(screen.getByLabelText("인수인계 메모"), "인수인계 메모 내용");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    await screen.findByDisplayValue("의사가 작성한 설명");
+
+    const patchCall = fetchMock.mock.calls.find(
+      (call: any[]) => (call[1] as RequestInit)?.method === "PATCH"
+    );
+    expect(patchCall).toBeDefined();
+    const sentBody = JSON.parse(patchCall![1].body);
+    expect(sentBody).toEqual({
+      narrative: "의사가 작성한 설명",
+      handoff_note: "인수인계 메모 내용",
+      patient_guidance: null, // 빈 textarea -> null로 정규화
+    });
+  });
+
+  it("prevents duplicate save requests while one is in flight", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    let resolvePatch: (value: unknown) => void = () => {};
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      if (options?.method === "PATCH") {
+        return new Promise((resolve) => {
+          resolvePatch = resolve;
+        });
+      }
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => SAMPLE_REPORT, text: async () => "",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.type(screen.getByLabelText("설명문"), "x");
+    const saveButton = screen.getByRole("button", { name: "저장" });
+    await user.click(saveButton);
+
+    expect(await screen.findByRole("button", { name: "저장하는 중..." })).toBeDisabled();
+
+    const patchCallsBefore = fetchMock.mock.calls.filter(
+      (call: any[]) => (call[1] as RequestInit)?.method === "PATCH"
+    ).length;
+    await user.click(screen.getByRole("button", { name: "저장하는 중..." }));
+    const patchCallsAfter = fetchMock.mock.calls.filter(
+      (call: any[]) => (call[1] as RequestInit)?.method === "PATCH"
+    ).length;
+    expect(patchCallsAfter).toBe(patchCallsBefore);
+
+    resolvePatch({ ok: true, status: 200, json: async () => SAMPLE_REPORT, text: async () => "" });
+  });
+
+  it("shows an inline two-step confirmation before approving, and cancel returns to idle", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const withNarrative = {
+      ...SAMPLE_REPORT,
+      content: { ...SAMPLE_REPORT.content, narrative: "설명문 있음" },
+    };
+    vi.stubGlobal("fetch", mockFetchOnce(200, withNarrative));
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.click(screen.getByRole("button", { name: "승인" }));
+
+    expect(screen.getByText("정말 승인하시겠습니까?")).toBeInTheDocument();
+    const confirmButton = screen.getByRole("button", { name: "승인 확정" });
+    expect(confirmButton).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "취소" }));
+    expect(screen.queryByText("정말 승인하시겠습니까?")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "승인" })).toBeInTheDocument();
+  });
+
+  it("approves after confirmation and updates the page without a full reload", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const withNarrative = {
+      ...SAMPLE_REPORT,
+      content: { ...SAMPLE_REPORT.content, narrative: "설명문 있음" },
+    };
+    const approvedReport = { ...withNarrative, status: "APPROVED", reviewed_by_user_id: 1 };
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      const isPost = options?.method === "POST" && String(url).includes("/approve");
+      const body = isPost ? approvedReport : withNarrative;
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.click(screen.getByRole("button", { name: "승인" }));
+    await user.click(screen.getByRole("button", { name: "승인 확정" }));
+
+    expect(await screen.findByText("승인")).toBeInTheDocument();
+    expect(screen.getByText("승인된 보고서는 수정할 수 없습니다.")).toBeInTheDocument();
+  });
+
+  it("shows the 409 detail message inline when approval is rejected for a missing narrative", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      const isApprove = options?.method === "POST" && String(url).includes("/approve");
+      if (isApprove) {
+        return Promise.resolve({
+          ok: false, status: 409,
+          json: async () => ({ detail: "설명문을 작성하거나 생성한 후 승인할 수 있습니다." }),
+          text: async () => "",
+        });
+      }
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => SAMPLE_REPORT, text: async () => "",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.click(screen.getByRole("button", { name: "승인" }));
+    await user.click(screen.getByRole("button", { name: "승인 확정" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("설명문을 작성하거나 생성한 후 승인할 수 있습니다.");
+  });
+
+  it("rejects after inline confirmation and shows the rewrite notice", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const rejectedReport = { ...SAMPLE_REPORT, status: "REJECTED", reviewed_by_user_id: 1 };
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      const isReject = options?.method === "POST" && String(url).includes("/reject");
+      const body = isReject ? rejectedReport : SAMPLE_REPORT;
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.click(screen.getByRole("button", { name: "반려" }));
+    expect(screen.getByText("정말 반려하시겠습니까?")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "반려 확정" }));
+
+    expect(
+      await screen.findByText("반려된 보고서입니다. 내용을 저장하면 다시 초안 상태가 됩니다.")
+    ).toBeInTheDocument();
+    // 반려 상태에서는 승인/반려 버튼이 사라지고 편집 폼만 남는다.
+    expect(screen.queryByRole("button", { name: "승인" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "반려" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "저장" })).toBeInTheDocument();
+  });
+
+  it("shows APPROVED content as read-only with no save/approve/reject buttons", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const approvedReport = {
+      ...SAMPLE_REPORT,
+      status: "APPROVED",
+      reviewed_by_user_id: 1,
+      reviewed_at: "2026-09-19T00:00:00Z",
+      content: { ...SAMPLE_REPORT.content, narrative: "승인된 설명문" },
+    };
+    vi.stubGlobal("fetch", mockFetchOnce(200, approvedReport));
+    renderPreviewPage();
+
+    await screen.findByText("진료참고 보고서");
+    expect(screen.getByText("승인된 보고서는 수정할 수 없습니다.")).toBeInTheDocument();
+    expect(screen.getByText(/설명문: 승인된 설명문/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("설명문")).not.toBeInTheDocument(); // textarea 없음
+    expect(screen.queryByRole("button", { name: "저장" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "승인" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "반려" })).not.toBeInTheDocument();
+  });
+
+  it("never calls the patient-facing exposure API (no such feature exists yet)", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = mockFetchOnce(200, SAMPLE_REPORT);
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+
+    await screen.findByText("진료참고 보고서");
+    for (const call of fetchMock.mock.calls) {
+      expect(String(call[0])).not.toContain("/publish");
+      expect(String(call[0])).not.toContain("/patient-view");
     }
   });
 });

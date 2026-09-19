@@ -10,6 +10,7 @@ from app.models import (
     AiSummaryStatus,
     ClinicalReport,
     ClinicalReportStatus,
+    ClinicalReportType,
     Encounter,
     Patient,
     Role,
@@ -18,6 +19,7 @@ from app.models import (
 from app.schemas.clinical_report import (
     ClinicalReportCreate,
     ClinicalReportOut,
+    ClinicalReportPatch,
     EmrSnapshot,
     ReportContentSnapshot,
 )
@@ -33,6 +35,16 @@ patient_reports_router = APIRouter(prefix="/patients", tags=["clinical_reports"]
 reports_router = APIRouter(prefix="/reports", tags=["clinical_reports"])
 
 _REPORT_SCOPE_NOT_FOUND_MESSAGE = "환자 또는 보고서 범위를 찾을 수 없거나 조회할 수 없습니다."
+# Task 17의 PATCH/approve/reject 세 엔드포인트가 공유하는 "이미 검토 완료된
+# 보고서" 409 문구 — Task 16의 generate-narrative는 이미 커밋된 별도 문구를
+# 그대로 두고(범위 밖 코드를 건드리지 않음), 이번에 새로 추가하는 세
+# 엔드포인트끼리만 문구를 통일한다.
+_REPORT_ALREADY_REVIEWED_MESSAGE = "검토가 이미 완료된 보고서는 수정할 수 없습니다."
+_NARRATIVE_REQUIRED_FOR_APPROVAL_MESSAGE = "설명문을 작성하거나 생성한 후 승인할 수 있습니다."
+
+
+def _is_blank(value: str | None) -> bool:
+    return value is None or value.strip() == ""
 
 
 def _to_clinical_report_out(report: ClinicalReport) -> ClinicalReportOut:
@@ -284,5 +296,168 @@ def generate_report_narrative(
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="설명문 생성 중 오류가 발생했습니다.")
+
+    return _to_clinical_report_out(report)
+
+
+@reports_router.patch("/{report_id}", response_model=ClinicalReportOut)
+def patch_clinical_report(
+    report_id: int,
+    body: ClinicalReportPatch,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.DOCTOR)),
+):
+    """DRAFT(또는 REJECTED — 자동으로 DRAFT로 되돌아감)의 서술형 필드
+    (narrative/handoff_note/patient_guidance)만 수정한다. APPROVED는
+    409로 거부한다 — 승인된 보고서는 이 Task에서 절대 바뀌지 않는다
+    (새 DRAFT를 만드는 supersedes 흐름은 이후 Task의 몫).
+
+    요청에 실제로 포함된 필드만 반영하고(model_fields_set 기준), 나머지
+    두 필드는 기존 값을 그대로 유지한다. emr_snapshot은 항상 그대로
+    복사해 새 content를 구성한 뒤 통째로 재할당한다 — JSON 제자리 수정을
+    하지 않는다.
+    """
+    report = db.query(ClinicalReport).filter_by(id=report_id).first()
+    if report is None or not can_access_patient(user, report.patient_id, db):
+        raise HTTPException(status_code=404, detail=_REPORT_SCOPE_NOT_FOUND_MESSAGE)
+
+    if report.status == ClinicalReportStatus.APPROVED:
+        raise HTTPException(status_code=409, detail=_REPORT_ALREADY_REVIEWED_MESSAGE)
+
+    was_rejected = report.status == ClinicalReportStatus.REJECTED
+
+    content = ReportContentSnapshot.model_validate(report.content)
+    provided_fields = body.model_dump(exclude_unset=True)
+    new_content = ReportContentSnapshot(
+        emr_snapshot=content.emr_snapshot,
+        narrative=provided_fields.get("narrative", content.narrative),
+        handoff_note=provided_fields.get("handoff_note", content.handoff_note),
+        patient_guidance=provided_fields.get("patient_guidance", content.patient_guidance),
+    )
+
+    now = datetime.now(timezone.utc)
+
+    try:
+        report.content = new_content.model_dump(mode="json")
+        report.last_modified_by_user_id = user.id
+        report.last_modified_at = now
+
+        if was_rejected:
+            report.status = ClinicalReportStatus.DRAFT
+            report.reviewed_by_user_id = None
+            report.reviewed_at = None
+            reason = "rejected_report_returned_to_draft"
+        else:
+            reason = "clinical_report_content_updated"
+
+        write_audit_log(
+            db,
+            actor_user_id=user.id,
+            action="UPDATE_REPORT",
+            resource_type="ClinicalReport",
+            resource_id=str(report.id),
+            reason=reason,
+            patient_id=report.patient_id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="보고서 수정 중 오류가 발생했습니다.")
+
+    return _to_clinical_report_out(report)
+
+
+@reports_router.post("/{report_id}/approve", response_model=ClinicalReportOut)
+def approve_clinical_report(
+    report_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.DOCTOR)),
+):
+    """DRAFT 보고서만 승인할 수 있다(APPROVED/REJECTED는 409). 작성자
+    본인이 승인해도 되고, 다른 담당 의사의 별도 승인은 필요 없다 —
+    can_access_patient()를 만족하는 DOCTOR라면 누구나 승인할 수 있다.
+
+    DOCTOR_REFERENCE 보고서는 narrative가 비어 있으면(None 또는 공백만)
+    승인할 수 없다 — Mock 설명문을 먼저 작성/생성해야 한다.
+
+    승인은 last_modified_by_user_id/last_modified_at을 건드리지 않는다
+    — 그 컬럼은 서술형 필드 수정 시각만 의미하며, 검토 시각(reviewed_at)과
+    분리되어야 한다.
+    """
+    report = db.query(ClinicalReport).filter_by(id=report_id).first()
+    if report is None or not can_access_patient(user, report.patient_id, db):
+        raise HTTPException(status_code=404, detail=_REPORT_SCOPE_NOT_FOUND_MESSAGE)
+
+    if report.status != ClinicalReportStatus.DRAFT:
+        raise HTTPException(status_code=409, detail=_REPORT_ALREADY_REVIEWED_MESSAGE)
+
+    content = ReportContentSnapshot.model_validate(report.content)
+    if report.report_type == ClinicalReportType.DOCTOR_REFERENCE and _is_blank(content.narrative):
+        raise HTTPException(status_code=409, detail=_NARRATIVE_REQUIRED_FOR_APPROVAL_MESSAGE)
+
+    now = datetime.now(timezone.utc)
+
+    try:
+        report.status = ClinicalReportStatus.APPROVED
+        report.reviewed_by_user_id = user.id
+        report.reviewed_at = now
+
+        write_audit_log(
+            db,
+            actor_user_id=user.id,
+            action="APPROVE_REPORT",
+            resource_type="ClinicalReport",
+            resource_id=str(report.id),
+            reason="clinical_report_approved",
+            patient_id=report.patient_id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="보고서 승인 중 오류가 발생했습니다.")
+
+    return _to_clinical_report_out(report)
+
+
+@reports_router.post("/{report_id}/reject", response_model=ClinicalReportOut)
+def reject_clinical_report(
+    report_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.DOCTOR)),
+):
+    """DRAFT 보고서만 반려할 수 있다(APPROVED/REJECTED는 409). 반려 사유를
+    저장할 필드가 현재 모델에 없어 이번 Task에서는 추가하지 않는다 —
+    상태 전이와 감사 로그만 남긴다.
+
+    승인과 마찬가지로 last_modified_by_user_id/last_modified_at은
+    건드리지 않는다.
+    """
+    report = db.query(ClinicalReport).filter_by(id=report_id).first()
+    if report is None or not can_access_patient(user, report.patient_id, db):
+        raise HTTPException(status_code=404, detail=_REPORT_SCOPE_NOT_FOUND_MESSAGE)
+
+    if report.status != ClinicalReportStatus.DRAFT:
+        raise HTTPException(status_code=409, detail=_REPORT_ALREADY_REVIEWED_MESSAGE)
+
+    now = datetime.now(timezone.utc)
+
+    try:
+        report.status = ClinicalReportStatus.REJECTED
+        report.reviewed_by_user_id = user.id
+        report.reviewed_at = now
+
+        write_audit_log(
+            db,
+            actor_user_id=user.id,
+            action="REJECT_REPORT",
+            resource_type="ClinicalReport",
+            resource_id=str(report.id),
+            reason="clinical_report_rejected",
+            patient_id=report.patient_id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="보고서 반려 중 오류가 발생했습니다.")
 
     return _to_clinical_report_out(report)

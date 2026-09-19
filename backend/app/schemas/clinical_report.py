@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import ClinicalReportScopeType, ClinicalReportType
 
@@ -176,6 +176,36 @@ class ClinicalReportCreate(BaseModel):
             raise ValueError("이번 버전에서는 scope_type=SINGLE_ENCOUNTER만 지원합니다.")
         if len(self.encounter_ids) != 1:
             raise ValueError("encounter_ids는 정확히 1개여야 합니다.")
+        return self
+
+
+class ClinicalReportPatch(BaseModel):
+    """DRAFT(또는 REJECTED — 자동으로 DRAFT로 전환됨) 보고서의 서술형
+    필드만 수정하는 요청. emr_snapshot/patient_id/status 등은 이 스키마에
+    필드 자체가 없으므로 extra="forbid"가 자동으로 422 거부한다.
+
+    exclude_unset=True로 model_dump()해야 "전달 안 함"과 "명시적으로
+    null 전달"을 구분할 수 있다 — 라우터가 이 구분을 사용한다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    narrative: str | None = Field(default=None, max_length=10000)
+    handoff_note: str | None = Field(default=None, max_length=10000)
+    patient_guidance: str | None = Field(default=None, max_length=10000)
+
+    @field_validator("narrative", "handoff_note", "patient_guidance")
+    @classmethod
+    def _blank_string_becomes_none(cls, value: str | None) -> str | None:
+        if value is not None and value.strip() == "":
+            return None
+        return value
+
+    @model_validator(mode="after")
+    def _require_at_least_one_field(self) -> "ClinicalReportPatch":
+        if not self.model_fields_set:
+            raise ValueError(
+                "narrative, handoff_note, patient_guidance 중 최소 하나는 포함해야 합니다."
+            )
         return self
 
 
