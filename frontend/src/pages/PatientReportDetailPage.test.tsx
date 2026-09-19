@@ -210,13 +210,14 @@ describe("PatientReportDetailPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows a MedicalTermButton for the encounter type (외래)", async () => {
+  it("shows the encounter type (외래) as plain text, not a MedicalTermButton", async () => {
     setStoredToken(makeFakeJwt("PATIENT"));
     vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_DETAIL));
     renderAt("1");
 
-    const outpatientButtons = await screen.findAllByRole("button", { name: /외래/ });
-    expect(outpatientButtons.length).toBeGreaterThan(0);
+    await screen.findByText("의사가 승인한 설명문입니다.");
+    expect(screen.getByText(/외래/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /외래/ })).not.toBeInTheDocument();
   });
 
   it("shows the patient-facing evidence phrase", async () => {

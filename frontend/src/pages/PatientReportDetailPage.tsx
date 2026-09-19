@@ -5,7 +5,6 @@ import { getPatientReport, PatientClinicalReportDetail } from "../api/patientRep
 import { formatDateTime } from "../components/labTrend/LabTrendPresentation";
 import PatientLabResultsTable from "../components/patientReport/PatientLabResultsTable";
 import PatientLabTrendGroupView from "../components/patientReport/PatientLabTrendGroupView";
-import TermOrPlainText from "../components/patientReport/TermOrPlainText";
 
 type LoadState = "loading" | "success" | "forbidden" | "notFound" | "error";
 
@@ -92,8 +91,8 @@ export default function PatientReportDetailPage() {
           <p>승인일: {formatDateTime(report.reviewed_at)}</p>
           <p>진료일: {formatDate(report.encounter_date)}</p>
           <p>
-            진료과: {DEPARTMENT_LABELS[report.department] ?? report.department} /{" "}
-            진료 형태: <TermOrPlainText text={ENCOUNTER_TYPE_LABELS[report.encounter_type] ?? report.encounter_type} />
+            진료과: {DEPARTMENT_LABELS[report.department] ?? report.department} / 진료 형태:{" "}
+            {ENCOUNTER_TYPE_LABELS[report.encounter_type] ?? report.encounter_type}
           </p>
 
           {report.narrative && (
