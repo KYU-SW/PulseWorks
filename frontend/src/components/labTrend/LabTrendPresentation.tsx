@@ -48,14 +48,60 @@ export function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
+// "%"는 숫자에 바로 붙이고, 그 외 단위(mg/dL, bpm 등)는 띄어 쓴다 — 예:
+// "7.2%", "130 mg/dL". 저장된 value를 그대로 문자열로 넣을 뿐 반올림하거나
+// 변환하지 않는다.
+function formatValueLabel(value: number, unit: string): string {
+  return unit === "%" ? `${value}${unit}` : `${value} ${unit}`;
+}
+
+// 값 라벨은 기존 판정 라벨(점 위 10px)보다 한 줄 더 위(NEAR)에 놓는다.
+// 값이 가까운 인접 점끼리 NEAR 위치에서 겹칠 것 같으면 한 단계 더
+// 위(FAR)로 올린다 — 두 단계로만 나눠 점이 많아도 라벨이 한없이 위로
+// 쌓이지 않게 한다.
+const VALUE_LABEL_NEAR_OFFSET = 24;
+const VALUE_LABEL_FAR_OFFSET = 38;
+const VALUE_LABEL_MIN_GAP = 12;
+
+function computeValueLabelOffsets(
+  points: LabTrendPresentationPoint[],
+  yForValue: (value: number) => number
+): number[] {
+  const offsets: number[] = [];
+  points.forEach((point, index) => {
+    if (index === 0) {
+      offsets.push(VALUE_LABEL_NEAR_OFFSET);
+      return;
+    }
+    const prevLabelY = yForValue(points[index - 1].value) - offsets[index - 1];
+    const nearLabelY = yForValue(point.value) - VALUE_LABEL_NEAR_OFFSET;
+    offsets.push(
+      Math.abs(nearLabelY - prevLabelY) < VALUE_LABEL_MIN_GAP
+        ? VALUE_LABEL_FAR_OFFSET
+        : VALUE_LABEL_NEAR_OFFSET
+    );
+  });
+  return offsets;
+}
+
+// 첫/마지막 점은 SVG 좌우 경계에 걸치므로 가운데 정렬(middle)로 두면 폭이
+// 넓은 값 라벨("130 mg/dL" 등)이 잘릴 수 있다 — 양 끝만 안쪽으로 정렬한다.
+function textAnchorForIndex(index: number, lastIndex: number): "start" | "middle" | "end" {
+  if (index === 0) return "start";
+  if (index === lastIndex) return "end";
+  return "middle";
+}
+
 // 단일 검사 항목의 선 그래프 — 점이 2개 이상일 때만 사용한다(한 점만 있는
 // 데이터를 추세로 표현하지 않는다). 순수 SVG로 직접 그린다: 이 규모의
 // 데모(검사 1개당 점 몇 개)에는 차트 라이브러리를 추가하는 비용이 더 크다고
 // 판단했다(Task 11 완료 보고서 참고).
 export function TrendChart({ points, unit }: { points: LabTrendPresentationPoint[]; unit: string }) {
   const width = 640;
-  const height = 220;
-  const padding = { top: 20, right: 24, bottom: 36, left: 48 };
+  const height = 260;
+  // top: 값 라벨이 FAR 단계(점 위 38px)까지 올라가도 글자가 잘리지
+  // 않을 여유를 둔다.
+  const padding = { top: 54, right: 24, bottom: 36, left: 48 };
 
   const referenceLow = points[0].reference_low;
   const referenceHigh = points[0].reference_high;
@@ -83,6 +129,9 @@ export function TrendChart({ points, unit }: { points: LabTrendPresentationPoint
   const linePath = points
     .map((p, i) => `${i === 0 ? "M" : "L"}${xForIndex(i)},${yForValue(p.value)}`)
     .join(" ");
+
+  const valueLabelOffsets = computeValueLabelOffsets(points, yForValue);
+  const lastIndex = points.length - 1;
 
   return (
     <svg
@@ -117,6 +166,16 @@ export function TrendChart({ points, unit }: { points: LabTrendPresentationPoint
             r={5}
             fill={statusColor(p.status)}
           />
+          <text
+            x={xForIndex(i)}
+            y={yForValue(p.value) - valueLabelOffsets[i]}
+            fontSize={11}
+            fontWeight="bold"
+            textAnchor={textAnchorForIndex(i, lastIndex)}
+            fill="#111827"
+          >
+            {formatValueLabel(p.value, p.unit)}
+          </text>
           <text
             x={xForIndex(i)}
             y={yForValue(p.value) - 10}
