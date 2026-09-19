@@ -5,7 +5,16 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.deps import require_roles
-from app.models import ClinicalReport, ClinicalReportStatus, Encounter, Patient, Role, User
+from app.models import (
+    AiSummary,
+    AiSummaryStatus,
+    ClinicalReport,
+    ClinicalReportStatus,
+    Encounter,
+    Patient,
+    Role,
+    User,
+)
 from app.schemas.clinical_report import (
     ClinicalReportCreate,
     ClinicalReportOut,
@@ -14,6 +23,7 @@ from app.schemas.clinical_report import (
 )
 from app.services.audit import write_audit_log
 from app.services.authorization import can_access_patient
+from app.services.mock_narrative import generate_mock_report_narrative
 from app.services.report_data import ReportScopeError, collect_report_data
 
 # 서로 다른 URL prefix(/patients/... vs /reports/...)를 하나의
@@ -166,5 +176,113 @@ def get_clinical_report(
         patient_id=report.patient_id,
     )
     db.commit()
+
+    return _to_clinical_report_out(report)
+
+
+def _find_reusable_ai_summary(
+    db: Session, patient_id: int, encounter_id: int, summary_text: str, source_record_ids: list[str]
+) -> AiSummary | None:
+    """(patient_id, encounter_id, status=DRAFT, summary_text) 조건으로 후보를
+    좁힌 뒤, source_record_ids를 정렬해 정확히 일치하는 것만 재사용한다.
+    JSON 배열 값 비교는 DB 쿼리 조건으로 이식성 있게 표현하기 어려워
+    Python에서 비교한다."""
+    sorted_target = sorted(source_record_ids)
+    candidates = (
+        db.query(AiSummary)
+        .filter_by(
+            patient_id=patient_id,
+            encounter_id=encounter_id,
+            status=AiSummaryStatus.DRAFT,
+            summary_text=summary_text,
+        )
+        .all()
+    )
+    for candidate in candidates:
+        if sorted(candidate.source_record_ids) == sorted_target:
+            return candidate
+    return None
+
+
+@reports_router.post("/{report_id}/generate-narrative", response_model=ClinicalReportOut)
+def generate_report_narrative(
+    report_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.DOCTOR)),
+):
+    """저장된 report.content.emr_snapshot만으로 결정적 Mock 설명문을
+    만들어 content.narrative에 채운다. 원본 EMR 테이블을 다시 조회하지
+    않는다 — collect_report_data()를 호출하지 않는다.
+
+    DRAFT에서만 실행할 수 있다(APPROVED/REJECTED는 409). narrative가 이미
+    있으면 자동으로 덮어쓰지 않고 기존 보고서를 그대로 200으로 반환한다 —
+    강제 재생성 기능은 없다. 실제 LLM이나 외부 AI API를 호출하지 않는다.
+    """
+    report = db.query(ClinicalReport).filter_by(id=report_id).first()
+    if report is None or not can_access_patient(user, report.patient_id, db):
+        raise HTTPException(status_code=404, detail=_REPORT_SCOPE_NOT_FOUND_MESSAGE)
+
+    if report.status != ClinicalReportStatus.DRAFT:
+        raise HTTPException(
+            status_code=409,
+            detail="검토가 이미 완료된 보고서의 설명문은 새로 생성할 수 없습니다.",
+        )
+
+    content = ReportContentSnapshot.model_validate(report.content)
+    if content.narrative is not None:
+        # 멱등성: 이미 생성된 설명문이 있으면 그대로 반환한다 — AiSummary
+        # 추가 생성, content 재저장, 감사 로그, last_modified 갱신 없음.
+        return _to_clinical_report_out(report)
+
+    mock_result = generate_mock_report_narrative(content.emr_snapshot)
+
+    new_content = ReportContentSnapshot(
+        emr_snapshot=content.emr_snapshot,
+        narrative=mock_result.summary_text,
+        handoff_note=content.handoff_note,
+        patient_guidance=content.patient_guidance,
+    )
+
+    now = datetime.now(timezone.utc)
+
+    try:
+        existing_summary = _find_reusable_ai_summary(
+            db, report.patient_id, report.encounter_id,
+            mock_result.summary_text, mock_result.source_record_ids,
+        )
+        if existing_summary is None:
+            db.add(
+                AiSummary(
+                    encounter_id=report.encounter_id,
+                    patient_id=report.patient_id,
+                    status=AiSummaryStatus.DRAFT,
+                    summary_text=mock_result.summary_text,
+                    source_record_ids=mock_result.source_record_ids,
+                    generated_at=now,
+                    reviewed_by_user_id=None,
+                    reviewed_at=None,
+                )
+            )
+            db.flush()
+
+        # JSON 내부를 제자리 수정하지 않는다 — 전체 새 dict를 만들어
+        # 통째로 재할당한다.
+        report.content = new_content.model_dump(mode="json")
+        report.last_modified_by_user_id = user.id
+        report.last_modified_at = now
+
+        write_audit_log(
+            db,
+            actor_user_id=user.id,
+            action="GENERATE_REPORT_NARRATIVE",
+            resource_type="ClinicalReport",
+            resource_id=str(report.id),
+            reason="deterministic_mock_narrative",
+            patient_id=report.patient_id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="설명문 생성 중 오류가 발생했습니다.")
 
     return _to_clinical_report_out(report)

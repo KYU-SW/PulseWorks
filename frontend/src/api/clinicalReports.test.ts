@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { setStoredToken } from "./client";
 import { makeFakeJwt } from "../test/fakeJwt";
-import { createClinicalReport, getClinicalReport } from "./clinicalReports";
+import { createClinicalReport, generateReportNarrative, getClinicalReport } from "./clinicalReports";
 
 const SAMPLE_REPORT = {
   id: 1,
@@ -145,4 +145,22 @@ it("never logs the token to the console", async () => {
     expect(call.map(String).join(" ")).not.toContain(token);
   }
   consoleSpy.mockRestore();
+});
+
+// generateReportNarrative(): 올바른 POST URL, Bearer 토큰 재사용, 200 응답 반환
+it("posts to /reports/{report_id}/generate-narrative and returns the updated report", async () => {
+  setStoredToken(makeFakeJwt("DOCTOR"));
+  const withNarrative = {
+    ...SAMPLE_REPORT,
+    content: { ...SAMPLE_REPORT.content, narrative: "생성된 설명문" },
+  };
+  const fetchMock = mockFetchOnce(200, withNarrative);
+  vi.stubGlobal("fetch", fetchMock);
+
+  const report = await generateReportNarrative(1);
+
+  const [url, options] = fetchMock.mock.calls[0];
+  expect(String(url)).toContain("/reports/1/generate-narrative");
+  expect(options.method).toBe("POST");
+  expect(report.content.narrative).toBe("생성된 설명문");
 });

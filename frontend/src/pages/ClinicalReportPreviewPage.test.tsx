@@ -89,6 +89,22 @@ function mockFetchOnce(status: number, body: unknown) {
   });
 }
 
+// GET /reports/{id}(최초 로딩)과 POST /reports/{id}/generate-narrative
+// (버튼 클릭)에 서로 다른 응답을 주기 위한 라우터.
+function mockFetchRouter(routes: { get: unknown; post?: unknown; postStatus?: number }) {
+  return vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+    const isPost = options?.method === "POST";
+    const body = isPost ? routes.post : routes.get;
+    const status = isPost ? routes.postStatus ?? 200 : 200;
+    return Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    });
+  });
+}
+
 function renderPreviewPage(reportId = "42") {
   return render(
     <AuthProvider>
@@ -321,5 +337,83 @@ describe("ClinicalReportPreviewPage", () => {
     await screen.findByRole("alert");
     expect(document.body.textContent).not.toContain(token);
     expect(document.body.textContent).not.toContain("SELECT");
+  });
+
+  // Mock 설명문 생성 버튼: narrative가 null이고 DRAFT일 때만 표시
+  it("shows the Mock narrative generation button only when DRAFT and narrative is null", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
+    renderPreviewPage();
+
+    expect(
+      await screen.findByRole("button", { name: "Mock 설명문 생성" })
+    ).toBeInTheDocument();
+  });
+
+  it("does not show the generation button when narrative already exists", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const withNarrative = {
+      ...SAMPLE_REPORT,
+      content: { ...SAMPLE_REPORT.content, narrative: "이미 생성된 설명문입니다." },
+    };
+    vi.stubGlobal("fetch", mockFetchOnce(200, withNarrative));
+    renderPreviewPage();
+
+    await screen.findByText("진료참고 보고서");
+    expect(screen.queryByRole("button", { name: "Mock 설명문 생성" })).not.toBeInTheDocument();
+    expect(screen.getByText("이미 생성된 설명문입니다.")).toBeInTheDocument();
+  });
+
+  it("disables the button while generating, prevents duplicate clicks, and updates in place on success", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const generatedReport = {
+      ...SAMPLE_REPORT,
+      content: { ...SAMPLE_REPORT.content, narrative: "생성된 Mock 설명문 초안입니다." },
+    };
+    const fetchMock = mockFetchRouter({ get: SAMPLE_REPORT, post: generatedReport });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: "Mock 설명문 생성" });
+    await user.click(button);
+
+    // 생성 중에는 버튼이 비활성화되고 문구가 바뀐다(요청이 동기적으로
+    // 즉시 끝나므로 최종 성공 상태까지 함께 확인한다).
+    await screen.findByText("Mock 설명문 초안");
+    expect(screen.getByText("생성된 Mock 설명문 초안입니다.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mock 설명문 생성" })).not.toBeInTheDocument();
+
+    const postCalls = fetchMock.mock.calls.filter(
+      (call: any[]) => (call[1] as RequestInit)?.method === "POST"
+    );
+    expect(postCalls).toHaveLength(1);
+    expect(String(postCalls[0][0])).toContain("/reports/42/generate-narrative");
+  });
+
+  it("shows a generic error and keeps the button usable when generation fails", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = mockFetchRouter({ get: SAMPLE_REPORT, post: { detail: "boom" }, postStatus: 500 });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: "Mock 설명문 생성" });
+    await user.click(button);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("설명문을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    expect(screen.getByRole("button", { name: "Mock 설명문 생성" })).not.toBeDisabled();
+  });
+
+  it("never renders the generation button as an edit, approve, reject, or PDF action", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
+    renderPreviewPage();
+
+    await screen.findByRole("button", { name: "Mock 설명문 생성" });
+    for (const forbiddenName of [/수정/, /승인/, /반려/, /PDF/, /다운로드/]) {
+      expect(screen.queryByRole("button", { name: forbiddenName })).not.toBeInTheDocument();
+    }
   });
 });

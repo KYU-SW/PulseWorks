@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError } from "../api/client";
-import { ClinicalReportOut, getClinicalReport } from "../api/clinicalReports";
+import { ClinicalReportOut, generateReportNarrative, getClinicalReport } from "../api/clinicalReports";
 import ReportRenderer from "../components/report/ReportRenderer";
 import { formatDateTime } from "../components/labTrend/LabTrendPresentation";
 
@@ -25,6 +25,8 @@ export default function ClinicalReportPreviewPage() {
   const [state, setState] = useState<LoadState>(
     isValidReportId(reportId) ? "loading" : "notFound"
   );
+  const [isGeneratingNarrative, setIsGeneratingNarrative] = useState(false);
+  const [narrativeError, setNarrativeError] = useState<string | null>(null);
   const hasFetchedRef = useRef(false);
 
   async function loadReport() {
@@ -53,6 +55,23 @@ export default function ClinicalReportPreviewPage() {
     }
   }
 
+  async function handleGenerateNarrative() {
+    if (!report || isGeneratingNarrative) return; // 중복 요청 방지
+    setNarrativeError(null);
+    setIsGeneratingNarrative(true);
+    try {
+      const updated = await generateReportNarrative(report.id);
+      // 반환된 ClinicalReport로 화면 상태만 갱신한다 — 전체 페이지 새로고침이나
+      // 추가 EMR API 호출 없음.
+      setReport(updated);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) return; // 전역 처리
+      setNarrativeError("설명문을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setIsGeneratingNarrative(false);
+    }
+  }
+
   useEffect(() => {
     if (hasFetchedRef.current) return;
     hasFetchedRef.current = true;
@@ -61,6 +80,9 @@ export default function ClinicalReportPreviewPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId]);
+
+  const canGenerateNarrative =
+    !!report && report.status === "DRAFT" && report.content.narrative === null;
 
   return (
     <div>
@@ -93,6 +115,26 @@ export default function ClinicalReportPreviewPage() {
 
           {report.status === "DRAFT" && (
             <p>이 보고서는 의료진 검토 전 초안이며 현재 환자에게 공개되지 않습니다.</p>
+          )}
+
+          {canGenerateNarrative && (
+            <div>
+              <button onClick={handleGenerateNarrative} disabled={isGeneratingNarrative}>
+                {isGeneratingNarrative ? "설명문을 생성하는 중..." : "Mock 설명문 생성"}
+              </button>
+              {narrativeError && <p role="alert">{narrativeError}</p>}
+            </div>
+          )}
+
+          {report.content.narrative && (
+            <section aria-labelledby="mock-narrative-heading">
+              <h2 id="mock-narrative-heading">Mock 설명문 초안</h2>
+              <p>{report.content.narrative}</p>
+              <p>
+                이 설명문은 정해진 규칙으로 만든 결정적 Mock 초안이며, 의료진의 검토가
+                필요합니다. 환자에게는 아직 공개되지 않습니다.
+              </p>
+            </section>
           )}
 
           <ReportRenderer content={report.content} />

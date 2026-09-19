@@ -156,3 +156,11 @@ export function createClinicalReport(
 export function getClinicalReport(reportId: string | number): Promise<ClinicalReportOut> {
   return apiGet<ClinicalReportOut>(`/reports/${reportId}`);
 }
+
+// 요청 본문이 필요 없는 액션형 엔드포인트 — 빈 객체를 보낸다(백엔드는
+// 이 엔드포인트에 요청 본문 파라미터를 두지 않으므로 무시된다).
+// narrative가 이미 있으면 백엔드가 그대로 기존 보고서를 200으로
+// 반환한다(멱등) — 강제 재생성 API는 없다.
+export function generateReportNarrative(reportId: string | number): Promise<ClinicalReportOut> {
+  return apiPost<ClinicalReportOut>(`/reports/${reportId}/generate-narrative`, {});
+}
