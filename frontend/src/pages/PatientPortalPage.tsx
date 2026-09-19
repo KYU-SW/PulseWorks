@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 export default function PatientPortalPage() {
@@ -14,7 +14,9 @@ export default function PatientPortalPage() {
     <div>
       <h1>환자 포털</h1>
       <p>로그인 역할: {role}</p>
-      <p>의료진이 승인한 검사결과와 AI 요약은 이후 작업에서 이 화면에 채워집니다.</p>
+      <p>
+        <Link to="/patient/reports">승인된 보고서 보기</Link>
+      </p>
       <button onClick={handleLogout}>로그아웃</button>
     </div>
   );

@@ -6,6 +6,8 @@ import DoctorDashboard from "./pages/DoctorDashboard";
 import PatientPortalPage from "./pages/PatientPortalPage";
 import PatientTimelinePage from "./pages/PatientTimelinePage";
 import ClinicalReportPreviewPage from "./pages/ClinicalReportPreviewPage";
+import PatientReportsPage from "./pages/PatientReportsPage";
+import PatientReportDetailPage from "./pages/PatientReportDetailPage";
 import UnsupportedRolePage from "./pages/UnsupportedRolePage";
 
 export default function App() {
@@ -43,6 +45,22 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["PATIENT"]}>
                 <PatientPortalPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/patient/reports"
+            element={
+              <ProtectedRoute allowedRoles={["PATIENT"]}>
+                <PatientReportsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/patient/reports/:reportId"
+            element={
+              <ProtectedRoute allowedRoles={["PATIENT"]}>
+                <PatientReportDetailPage />
               </ProtectedRoute>
             }
           />
