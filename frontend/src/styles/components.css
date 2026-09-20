@@ -1,0 +1,182 @@
+.ui-card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4);
+}
+
+.ui-section-card__title {
+  font-size: var(--font-size-lg);
+  margin-bottom: var(--space-3);
+}
+
+.ui-button,
+.ui-link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-size: var(--font-size-base);
+  text-decoration: none;
+}
+
+.ui-button {
+  cursor: pointer;
+}
+
+.ui-button--primary {
+  background-color: var(--color-brand);
+  color: #fff;
+}
+.ui-button--primary:hover {
+  background-color: var(--color-brand-hover);
+}
+.ui-button--primary:active {
+  background-color: var(--color-brand-active);
+}
+
+.ui-button--secondary {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.ui-button--danger {
+  background-color: var(--color-error);
+  color: #fff;
+}
+
+.ui-button--ghost {
+  background-color: transparent;
+  color: var(--color-brand);
+}
+
+.ui-button--loading {
+  cursor: progress;
+}
+
+.ui-button:disabled {
+  cursor: not-allowed;
+}
+
+.ui-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.ui-status-badge__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: currentColor;
+  display: inline-block;
+}
+
+.ui-status-badge--report-draft {
+  color: var(--color-report-draft);
+}
+.ui-status-badge--report-approved {
+  color: var(--color-report-approved);
+}
+.ui-status-badge--report-rejected {
+  color: var(--color-report-rejected);
+}
+.ui-status-badge--lab-low {
+  color: var(--color-lab-low);
+}
+.ui-status-badge--lab-normal {
+  color: var(--color-lab-normal);
+}
+.ui-status-badge--lab-high {
+  color: var(--color-lab-high);
+}
+.ui-status-badge--lab-unknown,
+.ui-status-badge--report-unknown {
+  color: var(--color-lab-unknown);
+}
+
+.ui-alert {
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid transparent;
+}
+.ui-alert--error {
+  background-color: #fee2e2;
+  border-color: #fecaca;
+  color: #7f1d1d;
+}
+.ui-alert--warning {
+  background-color: #fef3c7;
+  border-color: #fde68a;
+  color: #78350f;
+}
+.ui-alert--info {
+  background-color: #dbeafe;
+  border-color: #bfdbfe;
+  color: #1e3a8a;
+}
+.ui-alert--success {
+  background-color: #dcfce7;
+  border-color: #bbf7d0;
+  color: #14532d;
+}
+
+.ui-empty-state,
+.ui-loading-state,
+.ui-error-state {
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.ui-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+
+.ui-form-field__label {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.ui-form-field__description {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.ui-form-field__error {
+  color: var(--color-error);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.ui-table-scroll {
+  overflow-x: auto;
+}
+
+/* 기존 MedicalTermDialog/MedicationDialog의 React 로직은 그대로 두고,
+   네이티브 dialog 요소의 시각 스타일만 여기서 입힌다 — showModal 동작,
+   Esc 닫기, 포커스 복귀, aria-labelledby, jsdom 스텁은 이 파일이
+   전혀 건드리지 않는다. open 상태를 CSS로 강제하지 않는다. */
+dialog {
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4);
+  max-width: 480px;
+  width: 90vw;
+}
+
+dialog::backdrop {
+  background-color: rgba(15, 23, 42, 0.5);
+}
