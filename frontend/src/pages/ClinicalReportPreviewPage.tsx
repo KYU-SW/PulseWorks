@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../api/client";
 import {
   approveClinicalReport,
@@ -11,15 +12,22 @@ import {
 } from "../api/clinicalReports";
 import ReportRenderer from "../components/report/ReportRenderer";
 import { formatDateTime } from "../components/labTrend/LabTrendPresentation";
+import AppShell from "../components/ui/AppShell";
+import AppHeader from "../components/ui/AppHeader";
+import Navigation from "../components/ui/Navigation";
+import PageHeader from "../components/ui/PageHeader";
+import Card from "../components/ui/Card";
+import SectionCard from "../components/ui/SectionCard";
+import StatusBadge from "../components/ui/StatusBadge";
+import AlertBox from "../components/ui/AlertBox";
+import FormField from "../components/ui/FormField";
+import Button from "../components/ui/Button";
+import LinkButton from "../components/ui/LinkButton";
+import LoadingState from "../components/ui/LoadingState";
+import ErrorState from "../components/ui/ErrorState";
 
 type LoadState = "loading" | "success" | "forbidden" | "notFound" | "error";
 type ConfirmStep = "idle" | "confirming";
-
-const REPORT_STATUS_LABELS: Record<string, string> = {
-  DRAFT: "초안",
-  APPROVED: "승인",
-  REJECTED: "반려",
-};
 
 const GENERIC_SAVE_ERROR = "보고서를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 const GENERIC_APPROVE_ERROR = "보고서를 승인하지 못했습니다. 잠시 후 다시 시도해 주세요.";
@@ -39,6 +47,14 @@ function blankToNull(value: string): string | null {
 
 export default function ClinicalReportPreviewPage() {
   const { reportId } = useParams();
+  const navigate = useNavigate();
+  const { role, logout } = useAuth();
+
+  function handleLogout() {
+    logout();
+    navigate("/login");
+  }
+
   const [report, setReport] = useState<ClinicalReportOut | null>(null);
   const [state, setState] = useState<LoadState>(
     isValidReportId(reportId) ? "loading" : "notFound"
@@ -188,158 +204,228 @@ export default function ClinicalReportPreviewPage() {
   const anyActionInFlight = isSaving || isApproving || isRejecting;
 
   return (
-    <div>
-      <h1>진료참고 보고서</h1>
+    <AppShell
+      header={
+        <AppHeader brand="EMR 프로토타입">
+          <Navigation role={role!} onLogout={handleLogout} />
+        </AppHeader>
+      }
+    >
+      <PageHeader title="진료참고 보고서" />
 
-      {state === "loading" && <p>보고서를 불러오는 중...</p>}
+      {state === "loading" && <LoadingState label="보고서를 불러오는 중..." />}
 
       {state === "notFound" && (
-        <p role="alert">보고서를 찾을 수 없거나 조회할 수 없습니다.</p>
+        <AlertBox variant="error" role="alert">
+          보고서를 찾을 수 없거나 조회할 수 없습니다.
+        </AlertBox>
       )}
 
-      {state === "forbidden" && <p role="alert">보고서를 조회할 권한이 없습니다.</p>}
+      {state === "forbidden" && (
+        <AlertBox variant="error" role="alert">
+          보고서를 조회할 권한이 없습니다.
+        </AlertBox>
+      )}
 
       {state === "error" && (
-        <div>
-          <p role="alert">보고서를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>
-          <button onClick={loadReport}>다시 시도</button>
-        </div>
+        <ErrorState
+          title="보고서를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+          onRetry={loadReport}
+        />
       )}
 
       {state === "success" && report && (
-        <div>
-          <p>
-            상태: <strong>{REPORT_STATUS_LABELS[report.status] ?? report.status}</strong>
-          </p>
-          <p>보고서 생성일: {formatDateTime(report.created_at)}</p>
-          <p>마지막 수정일: {formatDateTime(report.last_modified_at)}</p>
-          <p>보고서 범위: 단일 진료 방문</p>
-          <p>이 보고서의 모든 임상 데이터는 합성(가짜) 교육용 데이터입니다.</p>
+        <div className="page-stack">
+          <Card>
+            <p>
+              상태: <StatusBadge kind="report" status={report.status} />
+            </p>
+            <p>보고서 생성일: {formatDateTime(report.created_at)}</p>
+            <p>마지막 수정일: {formatDateTime(report.last_modified_at)}</p>
+            <p>보고서 범위: 단일 진료 방문</p>
+            <p>이 보고서의 모든 임상 데이터는 합성(가짜) 교육용 데이터입니다.</p>
 
-          {report.status === "DRAFT" && (
-            <p>이 보고서는 의료진 검토 전 초안이며 현재 환자에게 공개되지 않습니다.</p>
-          )}
-          {report.status === "REJECTED" && (
-            <p>반려된 보고서입니다. 내용을 저장하면 다시 초안 상태가 됩니다.</p>
-          )}
-          {report.status === "APPROVED" && <p>승인된 보고서는 수정할 수 없습니다.</p>}
+            {report.status === "DRAFT" && (
+              <AlertBox variant="info">
+                이 보고서는 의료진 검토 전 초안이며 현재 환자에게 공개되지 않습니다.
+              </AlertBox>
+            )}
+            {report.status === "REJECTED" && (
+              <AlertBox variant="warning">
+                반려된 보고서입니다. 내용을 저장하면 다시 초안 상태가 됩니다.
+              </AlertBox>
+            )}
+            {report.status === "APPROVED" && (
+              <AlertBox variant="success">승인된 보고서는 수정할 수 없습니다.</AlertBox>
+            )}
+          </Card>
 
           {canGenerateNarrative && (
-            <div>
-              <button onClick={handleGenerateNarrative} disabled={isGeneratingNarrative}>
+            <Card>
+              <Button
+                variant="primary"
+                onClick={handleGenerateNarrative}
+                disabled={isGeneratingNarrative}
+                loading={isGeneratingNarrative}
+              >
                 {isGeneratingNarrative ? "설명문을 생성하는 중..." : "Mock 설명문 생성"}
-              </button>
-              {narrativeError && <p role="alert">{narrativeError}</p>}
-            </div>
+              </Button>
+              {narrativeError && (
+                <AlertBox variant="error" role="alert">
+                  {narrativeError}
+                </AlertBox>
+              )}
+            </Card>
           )}
 
           {isEditable && (
-            <section aria-labelledby="edit-section-heading">
-              <h2 id="edit-section-heading">서술형 내용 편집</h2>
+            <SectionCard title="서술형 내용 편집">
               <p>
                 이 내용은 정해진 규칙으로 만든 결정적 Mock 초안이거나 의료진이 직접 작성한
                 내용이며, 의료진의 검토가 필요합니다. 환자에게는 아직 공개되지 않습니다.
               </p>
 
-              <div>
-                <label htmlFor="narrative-textarea">설명문</label>
-                <br />
+              <FormField label="설명문" htmlFor="narrative-textarea">
                 <textarea
                   id="narrative-textarea"
                   value={editableNarrative}
                   onChange={(e) => setEditableNarrative(e.target.value)}
                   disabled={anyActionInFlight}
                 />
-              </div>
+              </FormField>
 
-              <div>
-                <label htmlFor="handoff-note-textarea">인수인계 메모</label>
-                <br />
+              <FormField label="인수인계 메모" htmlFor="handoff-note-textarea">
                 <textarea
                   id="handoff-note-textarea"
                   value={editableHandoffNote}
                   onChange={(e) => setEditableHandoffNote(e.target.value)}
                   disabled={anyActionInFlight}
                 />
-              </div>
+              </FormField>
 
-              <div>
-                <label htmlFor="patient-guidance-textarea">환자 안내문</label>
-                <br />
+              <FormField label="환자 안내문" htmlFor="patient-guidance-textarea">
                 <textarea
                   id="patient-guidance-textarea"
                   value={editablePatientGuidance}
                   onChange={(e) => setEditablePatientGuidance(e.target.value)}
                   disabled={anyActionInFlight}
                 />
-              </div>
+              </FormField>
 
-              <button onClick={handleSave} disabled={anyActionInFlight}>
+              <Button
+                variant="primary"
+                onClick={handleSave}
+                disabled={anyActionInFlight}
+                loading={isSaving}
+              >
                 {isSaving ? "저장하는 중..." : "저장"}
-              </button>
-              {saveError && <p role="alert">{saveError}</p>}
-            </section>
+              </Button>
+              {saveError && (
+                <AlertBox variant="error" role="alert">
+                  {saveError}
+                </AlertBox>
+              )}
+            </SectionCard>
           )}
 
           {report.status === "APPROVED" && (
-            <section aria-labelledby="approved-content-heading">
-              <h2 id="approved-content-heading">서술형 내용 (읽기 전용)</h2>
+            <SectionCard title="서술형 내용 (읽기 전용)">
               <p>설명문: {report.content.narrative ?? "(없음)"}</p>
               <p>인수인계 메모: {report.content.handoff_note ?? "(없음)"}</p>
               <p>환자 안내문: {report.content.patient_guidance ?? "(없음)"}</p>
-            </section>
+            </SectionCard>
           )}
 
           {report.status === "DRAFT" && (
-            <div>
+            <Card>
               {approveStep === "idle" && (
-                <button onClick={() => setApproveStep("confirming")} disabled={anyActionInFlight}>
+                <Button
+                  variant="primary"
+                  onClick={() => setApproveStep("confirming")}
+                  disabled={anyActionInFlight}
+                >
                   승인
-                </button>
+                </Button>
               )}
               {approveStep === "confirming" && (
                 <div role="group" aria-label="승인 확인">
                   <p>정말 승인하시겠습니까?</p>
-                  <button onClick={handleApproveConfirmed} disabled={isApproving}>
+                  <Button
+                    variant="primary"
+                    onClick={handleApproveConfirmed}
+                    disabled={isApproving}
+                    loading={isApproving}
+                  >
                     {isApproving ? "승인하는 중..." : "승인 확정"}
-                  </button>
-                  <button onClick={() => setApproveStep("idle")} disabled={isApproving}>
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setApproveStep("idle")}
+                    disabled={isApproving}
+                  >
                     취소
-                  </button>
+                  </Button>
                 </div>
               )}
-              {approveError && <p role="alert">{approveError}</p>}
+              {approveError && (
+                <AlertBox variant="error" role="alert">
+                  {approveError}
+                </AlertBox>
+              )}
 
               {rejectStep === "idle" && (
-                <button onClick={() => setRejectStep("confirming")} disabled={anyActionInFlight}>
+                <Button
+                  variant="danger"
+                  onClick={() => setRejectStep("confirming")}
+                  disabled={anyActionInFlight}
+                >
                   반려
-                </button>
+                </Button>
               )}
               {rejectStep === "confirming" && (
                 <div role="group" aria-label="반려 확인">
                   <p>정말 반려하시겠습니까?</p>
-                  <button onClick={handleRejectConfirmed} disabled={isRejecting}>
+                  <Button
+                    variant="danger"
+                    onClick={handleRejectConfirmed}
+                    disabled={isRejecting}
+                    loading={isRejecting}
+                  >
                     {isRejecting ? "반려하는 중..." : "반려 확정"}
-                  </button>
-                  <button onClick={() => setRejectStep("idle")} disabled={isRejecting}>
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setRejectStep("idle")}
+                    disabled={isRejecting}
+                  >
                     취소
-                  </button>
+                  </Button>
                 </div>
               )}
-              {rejectError && <p role="alert">{rejectError}</p>}
-            </div>
+              {rejectError && (
+                <AlertBox variant="error" role="alert">
+                  {rejectError}
+                </AlertBox>
+              )}
+            </Card>
           )}
 
-          <ReportRenderer content={report.content} />
+          <Card>
+            <ReportRenderer content={report.content} />
+          </Card>
 
           <p>
-            <Link to={`/doctor/patients/${report.patient_id}`}>환자 타임라인으로 돌아가기</Link>
+            <LinkButton to={`/doctor/patients/${report.patient_id}`} variant="ghost">
+              환자 타임라인으로 돌아가기
+            </LinkButton>
           </p>
           <p>
-            <Link to="/doctor">담당 환자 목록으로 돌아가기</Link>
+            <LinkButton to="/doctor" variant="ghost">
+              담당 환자 목록으로 돌아가기
+            </LinkButton>
           </p>
         </div>
       )}
-    </div>
+    </AppShell>
   );
 }

@@ -1,6 +1,12 @@
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import AppShell from "../components/ui/AppShell";
+import Card from "../components/ui/Card";
+import PageHeader from "../components/ui/PageHeader";
+import FormField from "../components/ui/FormField";
+import Button from "../components/ui/Button";
+import AlertBox from "../components/ui/AlertBox";
 
 const GENERIC_LOGIN_ERROR = "이메일 또는 비밀번호가 올바르지 않습니다.";
 
@@ -39,43 +45,49 @@ export default function LoginPage() {
   }
 
   return (
-    <div>
-      <h1>EMR 프로토타입</h1>
-      <p>의료IT학과 학부 3학년 2학기 설계 과목의 교육용 EMR 프로토타입입니다.</p>
-      <p>
-        이 시스템의 모든 환자·진료 데이터는 <strong>합성(가짜) 데이터</strong>이며,
-        실제 의료기관 운영 목적으로 사용되지 않습니다.
-      </p>
+    <AppShell>
+      <Card>
+        <PageHeader
+          title="EMR 프로토타입"
+          description="의료IT학과 학부 3학년 2학기 설계 과목의 교육용 EMR 프로토타입입니다."
+        />
+        <p>
+          이 시스템의 모든 환자·진료 데이터는 <strong>합성(가짜) 데이터</strong>이며,
+          실제 의료기관 운영 목적으로 사용되지 않습니다.
+        </p>
 
-      <form onSubmit={handleSubmit}>
-        <div>
-          <label htmlFor="email">이메일</label>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="username"
-            required
-          />
-        </div>
-        <div>
-          <label htmlFor="password">비밀번호</label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            required
-          />
-        </div>
-        <button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "로그인 중..." : "로그인"}
-        </button>
-      </form>
+        <form onSubmit={handleSubmit}>
+          <FormField label="이메일" htmlFor="email">
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="username"
+              required
+            />
+          </FormField>
+          <FormField label="비밀번호" htmlFor="password">
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </FormField>
+          <Button type="submit" variant="primary" loading={isSubmitting}>
+            {isSubmitting ? "로그인 중..." : "로그인"}
+          </Button>
+        </form>
 
-      {error && <p role="alert">{error}</p>}
-    </div>
+        {error && (
+          <AlertBox variant="error" role="alert">
+            {error}
+          </AlertBox>
+        )}
+      </Card>
+    </AppShell>
   );
 }

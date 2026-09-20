@@ -2,6 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import { getPatientLabTrends, LabTrendGroup } from "../api/labTrends";
 import { LabTrendPointsView } from "./labTrend/LabTrendPresentation";
+import SectionCard from "./ui/SectionCard";
+import FormField from "./ui/FormField";
+import AlertBox from "./ui/AlertBox";
+import EmptyState from "./ui/EmptyState";
+import LoadingState from "./ui/LoadingState";
+import ErrorState from "./ui/ErrorState";
 
 type LoadState = "loading" | "success" | "forbidden" | "notFound" | "error";
 
@@ -65,31 +71,40 @@ export default function LabTrendSection({ patientId }: { patientId: string | num
   );
 
   return (
-    <section>
-      <h2>검사 추세</h2>
+    <SectionCard title="검사 추세">
       <p>이 섹션의 그래프와 표는 합성(가짜) 교육용 데이터와 데모 참고범위를 사용합니다.</p>
       <p>이 그래프는 진단이나 예측을 수행하지 않으며, AI가 추세를 해석하지 않습니다.</p>
 
-      {state === "loading" && <p>검사 추세를 불러오는 중...</p>}
+      {state === "loading" && <LoadingState label="검사 추세를 불러오는 중..." />}
 
-      {state === "forbidden" && <p role="alert">검사 추세를 조회할 권한이 없습니다.</p>}
-
-      {state === "notFound" && <p role="alert">환자를 찾을 수 없습니다.</p>}
-
-      {state === "error" && (
-        <div>
-          <p role="alert">검사 추세를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>
-          <button onClick={loadTrends}>다시 시도</button>
-        </div>
+      {state === "forbidden" && (
+        <AlertBox variant="error" role="alert">
+          검사 추세를 조회할 권한이 없습니다.
+        </AlertBox>
       )}
 
-      {state === "success" && trends.length === 0 && <p>표시할 검사결과가 없습니다.</p>}
+      {state === "notFound" && (
+        <AlertBox variant="error" role="alert">
+          환자를 찾을 수 없습니다.
+        </AlertBox>
+      )}
+
+      {state === "error" && (
+        <ErrorState
+          title="검사 추세를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+          onRetry={loadTrends}
+        />
+      )}
+
+      {state === "success" && trends.length === 0 && (
+        <EmptyState title="표시할 검사결과가 없습니다." />
+      )}
 
       {state === "success" && trends.length > 0 && (
-        <div>
-          <label>
-            검사 항목 선택{" "}
+        <div className="page-stack">
+          <FormField label="검사 항목 선택" htmlFor="lab-trend-select">
             <select
+              id="lab-trend-select"
               value={selectedKey ?? ""}
               onChange={(e) => setSelectedKey(e.target.value)}
             >
@@ -99,7 +114,7 @@ export default function LabTrendSection({ patientId }: { patientId: string | num
                 </option>
               ))}
             </select>
-          </label>
+          </FormField>
 
           {selectedGroup && (
             <LabTrendPointsView
@@ -110,6 +125,6 @@ export default function LabTrendSection({ patientId }: { patientId: string | num
           )}
         </div>
       )}
-    </section>
+    </SectionCard>
   );
 }

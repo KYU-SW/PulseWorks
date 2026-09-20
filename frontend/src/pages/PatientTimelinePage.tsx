@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../api/client";
 import { createClinicalReport } from "../api/clinicalReports";
 import {
@@ -8,6 +9,18 @@ import {
   TimelineEventType,
 } from "../api/timeline";
 import LabTrendSection from "../components/LabTrendSection";
+import AppShell from "../components/ui/AppShell";
+import AppHeader from "../components/ui/AppHeader";
+import Navigation from "../components/ui/Navigation";
+import PageHeader from "../components/ui/PageHeader";
+import Card from "../components/ui/Card";
+import SectionCard from "../components/ui/SectionCard";
+import Button from "../components/ui/Button";
+import AlertBox from "../components/ui/AlertBox";
+import EmptyState from "../components/ui/EmptyState";
+import LoadingState from "../components/ui/LoadingState";
+import ErrorState from "../components/ui/ErrorState";
+import LinkButton from "../components/ui/LinkButton";
 
 type LoadState = "loading" | "success" | "forbidden" | "notFound" | "error";
 
@@ -27,6 +40,13 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
 export default function PatientTimelinePage() {
   const { patientId } = useParams();
   const navigate = useNavigate();
+  const { role, logout } = useAuth();
+
+  function handleLogout() {
+    logout();
+    navigate("/login");
+  }
+
   const [data, setData] = useState<PatientTimeline | null>(null);
   const [state, setState] = useState<LoadState>("loading");
   const hasFetchedRef = useRef(false);
@@ -107,73 +127,99 @@ export default function PatientTimelinePage() {
   }, [patientId]);
 
   return (
-    <div>
+    <AppShell
+      header={
+        <AppHeader brand="EMR 프로토타입">
+          <Navigation role={role!} onLogout={handleLogout} />
+        </AppHeader>
+      }
+    >
       <p>
-        <Link to="/doctor">← 담당 환자 목록으로 돌아가기</Link>
+        <LinkButton to="/doctor" variant="ghost">
+          ← 담당 환자 목록으로 돌아가기
+        </LinkButton>
       </p>
 
-      {state === "loading" && <p>환자 타임라인을 불러오는 중...</p>}
+      {state === "loading" && <LoadingState label="환자 타임라인을 불러오는 중..." />}
 
-      {state === "notFound" && <p role="alert">환자를 찾을 수 없습니다.</p>}
+      {state === "notFound" && (
+        <AlertBox variant="error" role="alert">
+          환자를 찾을 수 없습니다.
+        </AlertBox>
+      )}
 
       {state === "forbidden" && (
-        <p role="alert">이 환자의 타임라인을 조회할 권한이 없습니다.</p>
+        <AlertBox variant="error" role="alert">
+          이 환자의 타임라인을 조회할 권한이 없습니다.
+        </AlertBox>
       )}
 
       {state === "error" && (
-        <div>
-          <p role="alert">타임라인을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>
-          <button onClick={loadTimeline}>다시 시도</button>
-        </div>
+        <ErrorState
+          title="타임라인을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+          onRetry={loadTimeline}
+        />
       )}
 
       {state === "success" && data && (
-        <div>
-          <h1>{data.patient.name}</h1>
-          <p>MRN: {data.patient.mrn}</p>
-          <p>생년월일: {data.patient.birth_date}</p>
-          <p>이 화면의 모든 임상 데이터는 합성(가짜) 교육용 데이터입니다.</p>
+        <div className="page-stack">
+          <Card>
+            <PageHeader
+              title={data.patient.name}
+              description={`MRN: ${data.patient.mrn} · 생년월일: ${data.patient.birth_date}`}
+            />
+            <p>이 화면의 모든 임상 데이터는 합성(가짜) 교육용 데이터입니다.</p>
+          </Card>
 
           {patientId && <LabTrendSection patientId={patientId} />}
 
-          {reportError && <p role="alert">{reportError}</p>}
-
-          {data.timeline.length === 0 && <p>표시할 타임라인 항목이 없습니다.</p>}
-
-          {data.timeline.length > 0 && (
-            <ul>
-              {data.timeline.map((item) => {
-                const isCreating = creatingEncounterIds.has(item.encounter_id);
-                return (
-                  <li key={`${item.event_type}-${item.id}`}>
-                    <span>{new Date(item.event_time).toLocaleString()}</span>{" — "}
-                    <strong>{EVENT_TYPE_LABELS[item.event_type]}</strong>{" — "}
-                    <span>{item.title}</span>{" — "}
-                    <span>{item.summary}</span>{" — "}
-                    <span>{item.department}</span>{" — "}
-                    <span>
-                      {item.source_type
-                        ? SOURCE_TYPE_LABELS[item.source_type] ?? item.source_type
-                        : "-"}
-                    </span>
-                    {item.event_type === "ENCOUNTER" && (
-                      <>
-                        {" — "}
-                        <button
-                          onClick={() => handleCreateReport(item.encounter_id)}
-                          disabled={isCreating}
-                        >
-                          {isCreating ? "보고서를 생성하는 중..." : "이 방문으로 진료참고 보고서 생성"}
-                        </button>
-                      </>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+          {reportError && (
+            <AlertBox variant="error" role="alert">
+              {reportError}
+            </AlertBox>
           )}
+
+          <SectionCard title="임상 타임라인">
+            {data.timeline.length === 0 ? (
+              <EmptyState title="표시할 타임라인 항목이 없습니다." />
+            ) : (
+              <ul className="page-stack">
+                {data.timeline.map((item) => {
+                  const isCreating = creatingEncounterIds.has(item.encounter_id);
+                  return (
+                    <li key={`${item.event_type}-${item.id}`}>
+                      <Card>
+                        <span>{new Date(item.event_time).toLocaleString()}</span>{" — "}
+                        <strong>{EVENT_TYPE_LABELS[item.event_type]}</strong>{" — "}
+                        <span>{item.title}</span>{" — "}
+                        <span>{item.summary}</span>{" — "}
+                        <span>{item.department}</span>{" — "}
+                        <span>
+                          {item.source_type
+                            ? SOURCE_TYPE_LABELS[item.source_type] ?? item.source_type
+                            : "-"}
+                        </span>
+                        {item.event_type === "ENCOUNTER" && (
+                          <>
+                            {" — "}
+                            <Button
+                              variant="primary"
+                              onClick={() => handleCreateReport(item.encounter_id)}
+                              disabled={isCreating}
+                            >
+                              {isCreating ? "보고서를 생성하는 중..." : "이 방문으로 진료참고 보고서 생성"}
+                            </Button>
+                          </>
+                        )}
+                      </Card>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </SectionCard>
         </div>
       )}
-    </div>
+    </AppShell>
   );
 }

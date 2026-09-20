@@ -561,7 +561,9 @@ describe("ClinicalReportPreviewPage", () => {
     await user.click(screen.getByRole("button", { name: "승인" }));
     await user.click(screen.getByRole("button", { name: "승인 확정" }));
 
-    expect(await screen.findByText("승인")).toBeInTheDocument();
+    // Task 20B: 보고서 상태 표시를 StatusBadge로 통일하며 문구도
+    // "승인"→"승인됨"으로 바뀌었다(의사 화면 전체 상태 어휘 통일).
+    expect(await screen.findByText("승인됨")).toBeInTheDocument();
     expect(screen.getByText("승인된 보고서는 수정할 수 없습니다.")).toBeInTheDocument();
   });
 

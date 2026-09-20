@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../api/client";
 import { AssignedPatient, getAssignedPatients } from "../api/patients";
+import AppShell from "../components/ui/AppShell";
+import AppHeader from "../components/ui/AppHeader";
+import Navigation from "../components/ui/Navigation";
+import PageHeader from "../components/ui/PageHeader";
+import Card from "../components/ui/Card";
+import LinkButton from "../components/ui/LinkButton";
+import LoadingState from "../components/ui/LoadingState";
+import EmptyState from "../components/ui/EmptyState";
+import ErrorState from "../components/ui/ErrorState";
+import AlertBox from "../components/ui/AlertBox";
 
 type LoadState = "loading" | "success" | "forbidden" | "error";
 
@@ -52,41 +62,54 @@ export default function DoctorDashboard() {
   }
 
   return (
-    <div>
-      <h1>의료진 대시보드</h1>
-      <p>로그인 역할: {role}</p>
+    <AppShell
+      header={
+        <AppHeader brand="EMR 프로토타입">
+          <Navigation role={role!} onLogout={handleLogout} />
+        </AppHeader>
+      }
+    >
+      <PageHeader title="의료진 대시보드" description={`로그인 역할: ${role}`} />
       <p>이 화면의 모든 환자 데이터는 합성(가짜) 교육용 데이터입니다.</p>
 
-      {state === "loading" && <p>담당 환자 목록을 불러오는 중...</p>}
+      {state === "loading" && <LoadingState label="담당 환자 목록을 불러오는 중..." />}
 
       {state === "forbidden" && (
-        <p role="alert">담당 환자 목록을 조회할 권한이 없습니다.</p>
+        <AlertBox variant="error" role="alert">
+          담당 환자 목록을 조회할 권한이 없습니다.
+        </AlertBox>
       )}
 
       {state === "error" && (
-        <div>
-          <p role="alert">담당 환자 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>
-          <button onClick={loadPatients}>다시 시도</button>
-        </div>
+        <ErrorState
+          title="담당 환자 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+          onRetry={loadPatients}
+        />
       )}
 
       {state === "success" && patients.length === 0 && (
-        <p>현재 배정된 환자가 없습니다.</p>
+        <EmptyState title="현재 배정된 환자가 없습니다." />
       )}
 
       {state === "success" && patients.length > 0 && (
-        <ul>
+        <ul className="page-grid">
           {patients.map((patient) => (
             <li key={patient.id}>
-              {patient.name} ({patient.mrn}) — 생년월일 {patient.birth_date} —{" "}
-              {patient.assignment_role}{" "}
-              <Link to={`/doctor/patients/${patient.id}`}>상세보기</Link>
+              <Card>
+                <p>
+                  {patient.name} ({patient.mrn})
+                </p>
+                <p>
+                  생년월일 {patient.birth_date} — {patient.assignment_role}
+                </p>
+                <LinkButton to={`/doctor/patients/${patient.id}`} variant="secondary">
+                  상세보기
+                </LinkButton>
+              </Card>
             </li>
           ))}
         </ul>
       )}
-
-      <button onClick={handleLogout}>로그아웃</button>
-    </div>
+    </AppShell>
   );
 }
