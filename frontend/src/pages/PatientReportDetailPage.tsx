@@ -3,8 +3,10 @@ import { useParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { getPatientReport, PatientClinicalReportDetail } from "../api/patientReports";
 import { formatDateTime } from "../components/labTrend/LabTrendPresentation";
+import PatientAllergiesList from "../components/patientReport/PatientAllergiesList";
 import PatientLabResultsTable from "../components/patientReport/PatientLabResultsTable";
 import PatientLabTrendGroupView from "../components/patientReport/PatientLabTrendGroupView";
+import PatientPrescriptionsList from "../components/patientReport/PatientPrescriptionsList";
 
 type LoadState = "loading" | "success" | "forbidden" | "notFound" | "error";
 
@@ -139,26 +141,14 @@ export default function PatientReportDetailPage() {
           {report.prescriptions.length > 0 && (
             <section>
               <h2>처방 기록</h2>
-              <ul>
-                {report.prescriptions.map((p, index) => (
-                  <li key={`${p.prescribed_at}-${index}`}>
-                    {p.medication_name} {p.dosage} — {formatDateTime(p.prescribed_at)}
-                  </li>
-                ))}
-              </ul>
+              <PatientPrescriptionsList prescriptions={report.prescriptions} />
             </section>
           )}
 
           {report.allergies.length > 0 && (
             <section>
               <h2>알레르기</h2>
-              <ul>
-                {report.allergies.map((a, index) => (
-                  <li key={`${a.substance}-${index}`}>
-                    {a.substance} ({a.reaction}, {a.severity})
-                  </li>
-                ))}
-              </ul>
+              <PatientAllergiesList allergies={report.allergies} />
             </section>
           )}
 

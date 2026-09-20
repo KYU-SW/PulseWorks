@@ -249,4 +249,47 @@ describe("PatientReportDetailPage", () => {
     expect(screen.queryByRole("button", { name: /반려/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
+
+  it("shows Metformin as a MedicationButton with the formatted dosage", async () => {
+    setStoredToken(makeFakeJwt("PATIENT"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_DETAIL));
+    renderAt("1");
+
+    expect(await screen.findByRole("button", { name: /메트포르민\(Metformin\)/ })).toBeInTheDocument();
+    expect(screen.getByText(/500 mg/)).toBeInTheDocument();
+  });
+
+  it("opens the medication dialog and shows its plain-language definition", async () => {
+    setStoredToken(makeFakeJwt("PATIENT"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_DETAIL));
+    renderAt("1");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: /메트포르민\(Metformin\)/ }));
+
+    expect(
+      screen.getByText("혈당 조절을 위해 사용될 수 있는 약물입니다.")
+    ).toBeInTheDocument();
+  });
+
+  it("shows the allergy severity as a Korean label (MODERATE -> 중간)", async () => {
+    setStoredToken(makeFakeJwt("PATIENT"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_DETAIL));
+    renderAt("1");
+
+    expect(await screen.findByText(/중간/)).toBeInTheDocument();
+    expect(screen.queryByText("MODERATE")).not.toBeInTheDocument();
+  });
+
+  it("never renders raw SafetyAlert-style directives (stop taking / dangerous / discontinue)", async () => {
+    setStoredToken(makeFakeJwt("PATIENT"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_DETAIL));
+    const { container } = renderAt("1");
+
+    await screen.findByText("의사가 승인한 설명문입니다.");
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("복용하지 마세요");
+    expect(text).not.toContain("위험합니다");
+    expect(text).not.toContain("중단하세요");
+  });
 });
