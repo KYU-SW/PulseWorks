@@ -25,7 +25,9 @@ from app.schemas.clinical_report import (
 )
 from app.services.audit import write_audit_log
 from app.services.authorization import can_access_patient
-from app.services.mock_narrative import generate_mock_report_narrative
+from app.services.narrative_providers.base import NarrativeProviderError
+from app.services.narrative_providers.factory import get_narrative_provider
+from app.services.narrative_validation import validate_narrative_provider_result
 from app.services.report_data import ReportScopeError, collect_report_data
 
 # 서로 다른 URL prefix(/patients/... vs /reports/...)를 하나의
@@ -41,6 +43,10 @@ _REPORT_SCOPE_NOT_FOUND_MESSAGE = "환자 또는 보고서 범위를 찾을 수 
 # 엔드포인트끼리만 문구를 통일한다.
 _REPORT_ALREADY_REVIEWED_MESSAGE = "검토가 이미 완료된 보고서는 수정할 수 없습니다."
 _NARRATIVE_REQUIRED_FOR_APPROVAL_MESSAGE = "설명문을 작성하거나 생성한 후 승인할 수 있습니다."
+# NarrativeProviderError의 code(LLM_API_KEY_MISSING 등)나 검증 실패
+# 사유를 그대로 노출하지 않는다 - 둘 다 이 두 일반 메시지로만 응답한다.
+_NARRATIVE_PROVIDER_UNAVAILABLE_MESSAGE = "설명문 생성 서비스를 사용할 수 없습니다."
+_NARRATIVE_VALIDATION_FAILED_MESSAGE = "생성된 설명문이 검증을 통과하지 못했습니다."
 
 
 def _is_blank(value: str | None) -> bool:
@@ -222,13 +228,22 @@ def generate_report_narrative(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(Role.DOCTOR)),
 ):
-    """저장된 report.content.emr_snapshot만으로 결정적 Mock 설명문을
-    만들어 content.narrative에 채운다. 원본 EMR 테이블을 다시 조회하지
-    않는다 — collect_report_data()를 호출하지 않는다.
+    """저장된 report.content.emr_snapshot만으로 설명문을 만들어
+    content.narrative에 채운다. 원본 EMR 테이블을 다시 조회하지 않는다 —
+    collect_report_data()를 호출하지 않는다.
 
     DRAFT에서만 실행할 수 있다(APPROVED/REJECTED는 409). narrative가 이미
     있으면 자동으로 덮어쓰지 않고 기존 보고서를 그대로 200으로 반환한다 —
-    강제 재생성 기능은 없다. 실제 LLM이나 외부 AI API를 호출하지 않는다.
+    강제 재생성 기능은 없다(이 분기가 provider 선택보다 먼저 있어,
+    narrative가 있으면 provider를 아예 호출하지 않는다).
+
+    실제로 어떤 provider를 쓸지는 NARRATIVE_PROVIDER 설정이 결정한다
+    (기본값 mock). NARRATIVE_PROVIDER=llm인데 키/모델이 없거나 실제
+    Adapter가 아직 없으면 Mock으로 조용히 대체하지 않고 503으로
+    실패한다 — 이번 버전은 실제 LLM이나 외부 AI API를 호출하지 않는다.
+    provider 결과는 저장하기 전 항상 validate_narrative_provider_result()를
+    통과해야 한다 — 실패하면 AiSummary/ClinicalReport.content/감사
+    로그/last_modified 무엇도 바뀌지 않는다.
     """
     report = db.query(ClinicalReport).filter_by(id=report_id).first()
     if report is None or not can_access_patient(user, report.patient_id, db):
@@ -242,25 +257,46 @@ def generate_report_narrative(
 
     content = ReportContentSnapshot.model_validate(report.content)
     if content.narrative is not None:
-        # 멱등성: 이미 생성된 설명문이 있으면 그대로 반환한다 — AiSummary
-        # 추가 생성, content 재저장, 감사 로그, last_modified 갱신 없음.
+        # 멱등성: 이미 생성된 설명문이 있으면 그대로 반환한다 — provider를
+        # 아예 호출하지 않는다. AiSummary 추가 생성, content 재저장,
+        # 감사 로그, last_modified 갱신 없음.
         return _to_clinical_report_out(report)
 
-    mock_result = generate_mock_report_narrative(content.emr_snapshot)
+    try:
+        provider = get_narrative_provider()
+        provider_result = provider.generate(content.emr_snapshot)
+    except NarrativeProviderError:
+        # code(LLM_API_KEY_MISSING 등)는 서버 로그에만 남고 응답에는
+        # 노출하지 않는다. DB에는 아무것도 쓰지 않았으므로 rollback도
+        # 필요 없다.
+        raise HTTPException(status_code=503, detail=_NARRATIVE_PROVIDER_UNAVAILABLE_MESSAGE)
+
+    validation = validate_narrative_provider_result(provider_result, content.emr_snapshot)
+    if not validation.ok:
+        # 검증 사유(reason)도 응답에 노출하지 않는다. 마찬가지로 DB에는
+        # 아직 아무것도 쓰지 않았다.
+        raise HTTPException(status_code=502, detail=_NARRATIVE_VALIDATION_FAILED_MESSAGE)
 
     new_content = ReportContentSnapshot(
         emr_snapshot=content.emr_snapshot,
-        narrative=mock_result.summary_text,
+        narrative=provider_result.narrative,
         handoff_note=content.handoff_note,
         patient_guidance=content.patient_guidance,
     )
 
     now = datetime.now(timezone.utc)
+    # Mock 성공은 Task 16의 기존 문구를 그대로 유지한다 — mock 기본값에서
+    # 감사 로그가 조금이라도 달라지면 안 된다.
+    audit_reason = (
+        "deterministic_mock_narrative"
+        if provider_result.provider == "DETERMINISTIC_MOCK"
+        else "llm_generated_narrative"
+    )
 
     try:
         existing_summary = _find_reusable_ai_summary(
             db, report.patient_id, report.encounter_id,
-            mock_result.summary_text, mock_result.source_record_ids,
+            provider_result.narrative, provider_result.cited_record_ids,
         )
         if existing_summary is None:
             db.add(
@@ -268,8 +304,8 @@ def generate_report_narrative(
                     encounter_id=report.encounter_id,
                     patient_id=report.patient_id,
                     status=AiSummaryStatus.DRAFT,
-                    summary_text=mock_result.summary_text,
-                    source_record_ids=mock_result.source_record_ids,
+                    summary_text=provider_result.narrative,
+                    source_record_ids=provider_result.cited_record_ids,
                     generated_at=now,
                     reviewed_by_user_id=None,
                     reviewed_at=None,
@@ -289,7 +325,7 @@ def generate_report_narrative(
             action="GENERATE_REPORT_NARRATIVE",
             resource_type="ClinicalReport",
             resource_id=str(report.id),
-            reason="deterministic_mock_narrative",
+            reason=audit_reason,
             patient_id=report.patient_id,
         )
         db.commit()
