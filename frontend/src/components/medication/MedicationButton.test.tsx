@@ -25,6 +25,14 @@ describe("MedicationButton", () => {
     expect(button.textContent).toContain("ⓘ");
   });
 
+  // Task 20C: MedicalTermButton과 동일한 공통 스타일 클래스를 공유한다.
+  it("applies the shared ui-term-trigger styling class", () => {
+    render(<MedicationButton medication={METFORMIN}>{METFORMIN.displayName}</MedicationButton>);
+
+    const button = screen.getByRole("button", { name: /메트포르민/ });
+    expect(button.className).toContain("ui-term-trigger");
+  });
+
   it("does not show the dialog until the button is activated", () => {
     render(<MedicationButton medication={METFORMIN}>{METFORMIN.displayName}</MedicationButton>);
 

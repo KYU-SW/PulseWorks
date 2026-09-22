@@ -42,4 +42,12 @@ describe("PatientAllergiesList", () => {
     const { container } = render(<PatientAllergiesList allergies={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  // Task 20C: 각 알레르기를 ul/li와 내부 중첩 목록은 그대로 두고,
+  // li 안에 Card로만 감쌌다.
+  it("wraps each allergy in a Card inside the existing nested ul/li structure", () => {
+    const { container } = render(<PatientAllergiesList allergies={ALLERGIES} />);
+    expect(container.querySelectorAll("li .ui-card")).toHaveLength(ALLERGIES.length);
+    expect(container.querySelectorAll(".ui-card ul li")).toHaveLength(ALLERGIES.length * 3);
+  });
 });

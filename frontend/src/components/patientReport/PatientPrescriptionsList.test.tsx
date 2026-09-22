@@ -68,4 +68,19 @@ describe("PatientPrescriptionsList", () => {
     const { container } = render(<PatientPrescriptionsList prescriptions={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  // Task 20C: 각 처방을 ul/li 유지 + li 안에 Card로 감싸고, 용량과
+  // 처방일을 별도 문단으로 분리했다.
+  it("wraps each prescription in a Card inside the existing ul/li structure", () => {
+    const { container } = render(<PatientPrescriptionsList prescriptions={PRESCRIPTIONS} />);
+    const list = container.querySelector("ul");
+    expect(list).not.toBeNull();
+    expect(container.querySelectorAll("li .ui-card")).toHaveLength(PRESCRIPTIONS.length);
+  });
+
+  it("shows dosage and prescribed date as separate lines", () => {
+    render(<PatientPrescriptionsList prescriptions={PRESCRIPTIONS} />);
+    expect(screen.getAllByText(/용량: 500 mg/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/처방일: /).length).toBe(PRESCRIPTIONS.length);
+  });
 });

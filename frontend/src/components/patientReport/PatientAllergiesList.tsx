@@ -1,4 +1,5 @@
 import { PatientAllergy } from "../../api/patientReports";
+import Card from "../ui/Card";
 
 const SEVERITY_LABELS: Record<string, string> = {
   MILD: "경미",
@@ -18,15 +19,17 @@ export default function PatientAllergiesList({ allergies }: { allergies: Patient
   if (allergies.length === 0) return null;
 
   return (
-    <ul>
+    <ul className="page-stack">
       {allergies.map((allergy, index) => (
         <li key={`${allergy.substance}-${index}`}>
-          <p>등록된 알레르기 정보</p>
-          <ul>
-            <li>물질: {allergy.substance}</li>
-            <li>기록된 반응: {allergy.reaction}</li>
-            <li>기록된 정도: {severityLabel(allergy.severity)}</li>
-          </ul>
+          <Card>
+            <p>등록된 알레르기 정보</p>
+            <ul>
+              <li>물질: {allergy.substance}</li>
+              <li>기록된 반응: {allergy.reaction}</li>
+              <li>기록된 정도: {severityLabel(allergy.severity)}</li>
+            </ul>
+          </Card>
         </li>
       ))}
     </ul>

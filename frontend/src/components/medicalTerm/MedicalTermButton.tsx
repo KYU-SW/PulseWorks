@@ -17,7 +17,13 @@ export default function MedicalTermButton({ term, children }: MedicalTermButtonP
 
   return (
     <>
-      <button type="button" ref={triggerRef} aria-haspopup="dialog" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className="ui-term-trigger"
+        ref={triggerRef}
+        aria-haspopup="dialog"
+        onClick={() => setOpen(true)}
+      >
         <span style={{ textDecoration: "underline" }}>{children}</span>
         <span aria-hidden="true"> ⓘ</span>
       </button>

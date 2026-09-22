@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AuthProvider } from "../auth/AuthContext";
 import { setStoredToken } from "../api/client";
 import { makeFakeJwt } from "../test/fakeJwt";
 import PatientReportsPage from "./PatientReportsPage";
@@ -27,9 +28,14 @@ function mockFetchOnce(status: number, body: unknown) {
 
 function renderPage() {
   return render(
-    <MemoryRouter>
-      <PatientReportsPage />
-    </MemoryRouter>
+    <AuthProvider>
+      <MemoryRouter initialEntries={["/patient/reports"]}>
+        <Routes>
+          <Route path="/patient/reports" element={<PatientReportsPage />} />
+          <Route path="/login" element={<div>LOGIN_SCREEN</div>} />
+        </Routes>
+      </MemoryRouter>
+    </AuthProvider>
   );
 }
 
@@ -88,7 +94,12 @@ describe("PatientReportsPage", () => {
     expect(alert.textContent).not.toContain("boom");
     await user.click(screen.getByRole("button", { name: "다시 시도" }));
 
-    await waitFor(() => expect(screen.getByRole("link")).toBeInTheDocument());
+    // Task 20C: Navigation이 항상 "승인된 보고서" 링크를 렌더링하므로,
+    // 이름 없는 getByRole("link")는 더 이상 유일하지 않다 — 목록 항목의
+    // 링크를 구체적으로 지정한다.
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /내분비내과/ })).toBeInTheDocument()
+    );
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

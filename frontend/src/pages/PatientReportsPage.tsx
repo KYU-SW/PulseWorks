@@ -1,8 +1,19 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../api/client";
 import { getPatientReports, PatientReportListItem } from "../api/patientReports";
 import { formatDateTime } from "../components/labTrend/LabTrendPresentation";
+import AppShell from "../components/ui/AppShell";
+import AppHeader from "../components/ui/AppHeader";
+import Navigation from "../components/ui/Navigation";
+import PageHeader from "../components/ui/PageHeader";
+import Card from "../components/ui/Card";
+import LinkButton from "../components/ui/LinkButton";
+import LoadingState from "../components/ui/LoadingState";
+import EmptyState from "../components/ui/EmptyState";
+import ErrorState from "../components/ui/ErrorState";
+import AlertBox from "../components/ui/AlertBox";
 
 // encounter_date는 시각 없는 순수 날짜 문자열("YYYY-MM-DD")이라, 시각까지
 // 표시하는 formatDateTime 대신 날짜만 보여주는 별도 헬퍼를 쓴다. new
@@ -31,6 +42,14 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
 };
 
 export default function PatientReportsPage() {
+  const { role, logout } = useAuth();
+  const navigate = useNavigate();
+
+  function handleLogout() {
+    logout();
+    navigate("/login");
+  }
+
   const [state, setState] = useState<LoadState>("loading");
   const [reports, setReports] = useState<PatientReportListItem[]>([]);
 
@@ -57,39 +76,50 @@ export default function PatientReportsPage() {
   }, []);
 
   return (
-    <div>
-      <h1>승인된 보고서</h1>
-      <p>담당 의료진이 승인한 보고서만 여기에 표시됩니다.</p>
+    <AppShell
+      header={
+        <AppHeader brand="EMR 프로토타입">
+          <Navigation role={role!} onLogout={handleLogout} />
+        </AppHeader>
+      }
+    >
+      <PageHeader title="승인된 보고서" description="담당 의료진이 승인한 보고서만 여기에 표시됩니다." />
 
-      {state === "loading" && <p>보고서 목록을 불러오는 중...</p>}
+      {state === "loading" && <LoadingState label="보고서 목록을 불러오는 중..." />}
 
-      {state === "forbidden" && <p role="alert">보고서 목록을 조회할 권한이 없습니다.</p>}
+      {state === "forbidden" && (
+        <AlertBox variant="error" role="alert">
+          보고서 목록을 조회할 권한이 없습니다.
+        </AlertBox>
+      )}
 
       {state === "error" && (
-        <div>
-          <p role="alert">보고서 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>
-          <button onClick={load}>다시 시도</button>
-        </div>
+        <ErrorState
+          title="보고서 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+          onRetry={load}
+        />
       )}
 
       {state === "success" && reports.length === 0 && (
-        <p>현재 확인할 수 있는 승인 보고서가 없습니다.</p>
+        <EmptyState title="현재 확인할 수 있는 승인 보고서가 없습니다." />
       )}
 
       {state === "success" && reports.length > 0 && (
-        <ul>
+        <ul className="page-grid">
           {reports.map((report) => (
             <li key={report.id}>
-              <Link to={`/patient/reports/${report.id}`}>
-                {formatDate(report.encounter_date)}{" "}
-                {DEPARTMENT_LABELS[report.department] ?? report.department}{" "}
-                {REPORT_TYPE_LABELS[report.report_type] ?? report.report_type} (승인일:{" "}
-                {formatDateTime(report.reviewed_at)})
-              </Link>
+              <Card>
+                <LinkButton to={`/patient/reports/${report.id}`} variant="ghost">
+                  {formatDate(report.encounter_date)}{" "}
+                  {DEPARTMENT_LABELS[report.department] ?? report.department}{" "}
+                  {REPORT_TYPE_LABELS[report.report_type] ?? report.report_type} (승인일:{" "}
+                  {formatDateTime(report.reviewed_at)})
+                </LinkButton>
+              </Card>
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </AppShell>
   );
 }

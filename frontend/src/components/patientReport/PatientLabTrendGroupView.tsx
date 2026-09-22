@@ -5,6 +5,7 @@ import {
 } from "../labTrend/LabTrendPresentation";
 import { PatientLabTrendGroup, PatientLabTrendPoint } from "../../api/patientReports";
 import TermOrPlainText from "./TermOrPlainText";
+import Card from "../ui/Card";
 
 // TrendChart/SingleResultCard(LabTrendPresentation.tsx)는 타입 선언에
 // rule_id/encounter_id/source_type을 요구하지만, 그 파일을 직접 확인한
@@ -31,11 +32,13 @@ export default function PatientLabTrendGroupView({ group }: { group: PatientLabT
       <h3>
         <TermOrPlainText text={testName} /> ({unit})
       </h3>
-      {points.length === 1 ? (
-        <SingleResultCard point={toPresentationPoint(points[0])} testName={testName} />
-      ) : (
-        <TrendChart points={points.map(toPresentationPoint)} unit={unit} />
-      )}
+      <Card>
+        {points.length === 1 ? (
+          <SingleResultCard point={toPresentationPoint(points[0])} testName={testName} />
+        ) : (
+          <TrendChart points={points.map(toPresentationPoint)} unit={unit} />
+        )}
+      </Card>
     </div>
   );
 }

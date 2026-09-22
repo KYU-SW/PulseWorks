@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AuthProvider } from "../auth/AuthContext";
 import { setStoredToken } from "../api/client";
 import { makeFakeJwt } from "../test/fakeJwt";
 import PatientReportDetailPage from "./PatientReportDetailPage";
@@ -53,11 +54,14 @@ function mockFetchOnce(status: number, body: unknown) {
 
 function renderAt(reportId: string) {
   return render(
-    <MemoryRouter initialEntries={[`/patient/reports/${reportId}`]}>
-      <Routes>
-        <Route path="/patient/reports/:reportId" element={<PatientReportDetailPage />} />
-      </Routes>
-    </MemoryRouter>
+    <AuthProvider>
+      <MemoryRouter initialEntries={[`/patient/reports/${reportId}`]}>
+        <Routes>
+          <Route path="/patient/reports/:reportId" element={<PatientReportDetailPage />} />
+          <Route path="/login" element={<div>LOGIN_SCREEN</div>} />
+        </Routes>
+      </MemoryRouter>
+    </AuthProvider>
   );
 }
 
@@ -119,7 +123,13 @@ describe("PatientReportDetailPage", () => {
     expect(alert.textContent).not.toContain("boom");
     await user.click(screen.getByRole("button", { name: "다시 시도" }));
 
-    await waitFor(() => expect(screen.getByText("승인된 보고서")).toBeInTheDocument());
+    // Task 20C: Navigation의 "승인된 보고서" 링크와 페이지 제목(h1)이
+    // 텍스트가 같아 더 이상 유일하지 않다 — heading role로 구체화한다.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { level: 1, name: "승인된 보고서" })
+      ).toBeInTheDocument()
+    );
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -233,9 +243,14 @@ describe("PatientReportDetailPage", () => {
     vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_DETAIL));
     renderAt("1");
 
-    expect(
-      await screen.findByText((_, el) => el?.textContent === SAMPLE_DETAIL.safety_notice)
-    ).toBeInTheDocument();
+    // Task 20C: AlertBox가 안내 문구를 여러 겹의 wrapper(div>div>p)로
+    // 감싸 같은 textContent를 가진 조상 엘리먼트가 여러 개 생긴다 —
+    // 가장 안쪽의 실제 텍스트 소유 엘리먼트(<p>)만 골라 확인한다.
+    const matches = await screen.findAllByText(
+      (_, el) => el?.textContent === SAMPLE_DETAIL.safety_notice
+    );
+    const innermost = matches.find((el) => el.tagName.toLowerCase() === "p");
+    expect(innermost).toBeInTheDocument();
   });
 
   it("never renders an edit, approve, or reject button", async () => {

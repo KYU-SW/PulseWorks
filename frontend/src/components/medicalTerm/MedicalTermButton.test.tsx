@@ -25,6 +25,15 @@ describe("MedicalTermButton", () => {
     expect(button.textContent).toContain("ⓘ");
   });
 
+  // Task 20C: 공통 시각 스타일(색상·간격·hover·터치 영역)은
+  // ui-term-trigger 클래스로 통일하되, 밑줄은 여전히 인라인 style이다.
+  it("applies the shared ui-term-trigger styling class", () => {
+    render(<MedicalTermButton term={HBA1C_TERM}>HbA1c</MedicalTermButton>);
+
+    const button = screen.getByRole("button", { name: /HbA1c/ });
+    expect(button.className).toContain("ui-term-trigger");
+  });
+
   it("does not show the dialog until the button is activated", () => {
     render(<MedicalTermButton term={HBA1C_TERM}>HbA1c</MedicalTermButton>);
 

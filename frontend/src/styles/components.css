@@ -164,6 +164,27 @@
   overflow-x: auto;
 }
 
+/* MedicalTermButton/MedicationButton 공통 스타일 — 밑줄(textDecoration)은
+   그대로 인라인 style로 남겨 둔다(테스트가 그 인라인 스타일을 직접
+   검증하고, 이 클래스는 컴포넌트 단위 테스트 환경에 로드되지 않는다).
+   여기서는 색상·간격·hover·포커스·터치 영역만 통일한다. */
+.ui-term-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-height);
+  padding: var(--space-1) var(--space-2);
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-brand);
+  cursor: pointer;
+}
+
+.ui-term-trigger:hover {
+  background-color: #eff6ff;
+}
+
 /* 기존 MedicalTermDialog/MedicationDialog의 React 로직은 그대로 두고,
    네이티브 dialog 요소의 시각 스타일만 여기서 입힌다 — showModal 동작,
    Esc 닫기, 포커스 복귀, aria-labelledby, jsdom 스텁은 이 파일이

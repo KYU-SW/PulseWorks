@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../api/client";
 import { getPatientReport, PatientClinicalReportDetail } from "../api/patientReports";
 import { formatDateTime } from "../components/labTrend/LabTrendPresentation";
@@ -7,6 +8,16 @@ import PatientAllergiesList from "../components/patientReport/PatientAllergiesLi
 import PatientLabResultsTable from "../components/patientReport/PatientLabResultsTable";
 import PatientLabTrendGroupView from "../components/patientReport/PatientLabTrendGroupView";
 import PatientPrescriptionsList from "../components/patientReport/PatientPrescriptionsList";
+import AppShell from "../components/ui/AppShell";
+import AppHeader from "../components/ui/AppHeader";
+import Navigation from "../components/ui/Navigation";
+import PageHeader from "../components/ui/PageHeader";
+import Card from "../components/ui/Card";
+import SectionCard from "../components/ui/SectionCard";
+import StatusBadge from "../components/ui/StatusBadge";
+import AlertBox from "../components/ui/AlertBox";
+import LoadingState from "../components/ui/LoadingState";
+import ErrorState from "../components/ui/ErrorState";
 
 type LoadState = "loading" | "success" | "forbidden" | "notFound" | "error";
 
@@ -35,6 +46,14 @@ function formatDate(isoDate: string): string {
 
 export default function PatientReportDetailPage() {
   const { reportId } = useParams();
+  const navigate = useNavigate();
+  const { role, logout } = useAuth();
+
+  function handleLogout() {
+    logout();
+    navigate("/login");
+  }
+
   const [report, setReport] = useState<PatientClinicalReportDetail | null>(null);
   const [state, setState] = useState<LoadState>(
     isValidReportId(reportId) ? "loading" : "notFound"
@@ -72,48 +91,64 @@ export default function PatientReportDetailPage() {
   }, [reportId]);
 
   return (
-    <div>
-      {state === "loading" && <p>보고서를 불러오는 중...</p>}
+    <AppShell
+      header={
+        <AppHeader brand="EMR 프로토타입">
+          <Navigation role={role!} onLogout={handleLogout} />
+        </AppHeader>
+      }
+    >
+      {state === "loading" && <LoadingState label="보고서를 불러오는 중..." />}
 
-      {state === "forbidden" && <p role="alert">이 보고서를 조회할 권한이 없습니다.</p>}
+      {state === "forbidden" && (
+        <AlertBox variant="error" role="alert">
+          이 보고서를 조회할 권한이 없습니다.
+        </AlertBox>
+      )}
 
-      {state === "notFound" && <p role="alert">보고서를 찾을 수 없거나 조회할 수 없습니다.</p>}
+      {state === "notFound" && (
+        <AlertBox variant="error" role="alert">
+          보고서를 찾을 수 없거나 조회할 수 없습니다.
+        </AlertBox>
+      )}
 
       {state === "error" && (
-        <div>
-          <p role="alert">보고서를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>
-          <button onClick={load}>다시 시도</button>
-        </div>
+        <ErrorState
+          title="보고서를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+          onRetry={load}
+        />
       )}
 
       {state === "success" && report && (
-        <div>
-          <h1>승인된 보고서</h1>
-          <p>상태: 승인됨</p>
-          <p>승인일: {formatDateTime(report.reviewed_at)}</p>
-          <p>진료일: {formatDate(report.encounter_date)}</p>
-          <p>
-            진료과: {DEPARTMENT_LABELS[report.department] ?? report.department} / 진료 형태:{" "}
-            {ENCOUNTER_TYPE_LABELS[report.encounter_type] ?? report.encounter_type}
-          </p>
+        <div className="page-stack">
+          <PageHeader title="승인된 보고서" />
+
+          <Card>
+            <p>
+              상태: <StatusBadge kind="report" status="APPROVED" />
+            </p>
+            <p>승인일: {formatDateTime(report.reviewed_at)}</p>
+            <p>진료일: {formatDate(report.encounter_date)}</p>
+            <p>
+              진료과: {DEPARTMENT_LABELS[report.department] ?? report.department} / 진료 형태:{" "}
+              {ENCOUNTER_TYPE_LABELS[report.encounter_type] ?? report.encounter_type}
+            </p>
+          </Card>
 
           {report.narrative && (
-            <section>
-              <h2>승인된 설명</h2>
+            <SectionCard title="승인된 설명">
               <p>{report.narrative}</p>
-            </section>
+            </SectionCard>
           )}
 
           {report.patient_guidance && (
-            <section>
-              <h2>의료진 안내</h2>
+            <SectionCard title="의료진 안내">
               <p>{report.patient_guidance}</p>
-            </section>
+            </SectionCard>
           )}
 
           {report.diagnoses.length > 0 && (
-            <section>
-              <h2>진단 기록</h2>
+            <SectionCard title="진단 기록">
               <ul>
                 {report.diagnoses.map((d, index) => (
                   <li key={`${d.diagnosed_at}-${index}`}>
@@ -121,51 +156,48 @@ export default function PatientReportDetailPage() {
                   </li>
                 ))}
               </ul>
-            </section>
+            </SectionCard>
           )}
 
-          <section>
-            <h2>검사결과</h2>
+          <SectionCard title="검사결과">
             <PatientLabResultsTable labResults={report.lab_results} />
-          </section>
+          </SectionCard>
 
           {report.lab_trends.length > 0 && (
-            <section>
-              <h2>검사 추세</h2>
+            <SectionCard title="검사 추세">
               {report.lab_trends.map((group) => (
                 <PatientLabTrendGroupView key={`${group.test_name}|${group.unit}`} group={group} />
               ))}
-            </section>
+            </SectionCard>
           )}
 
           {report.prescriptions.length > 0 && (
-            <section>
-              <h2>처방 기록</h2>
+            <SectionCard title="처방 기록">
               <PatientPrescriptionsList prescriptions={report.prescriptions} />
-            </section>
+            </SectionCard>
           )}
 
           {report.allergies.length > 0 && (
-            <section>
-              <h2>알레르기</h2>
+            <SectionCard title="알레르기">
               <PatientAllergiesList allergies={report.allergies} />
-            </section>
+            </SectionCard>
           )}
 
           {report.evidence.length > 0 && (
-            <section>
-              <h2>근거 자료</h2>
+            <SectionCard title="근거 자료">
               <ul>
                 {report.evidence.map((item, index) => (
                   <li key={index}>{item}</li>
                 ))}
               </ul>
-            </section>
+            </SectionCard>
           )}
 
-          <p style={{ whiteSpace: "pre-line" }}>{report.safety_notice}</p>
+          <AlertBox variant="info">
+            <p style={{ whiteSpace: "pre-line" }}>{report.safety_notice}</p>
+          </AlertBox>
         </div>
       )}
-    </div>
+    </AppShell>
   );
 }
