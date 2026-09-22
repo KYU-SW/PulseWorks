@@ -201,3 +201,23 @@ dialog {
 dialog::backdrop {
   background-color: rgba(15, 23, 42, 0.5);
 }
+
+/* Task 20 후속: 보고서 저장 버튼과 그 옆의 "저장되었습니다." 상태 메시지.
+   기존 Button의 포커스 링/loading 스타일은 그대로 쓴다 — 여기서는 버튼과
+   피드백 문구의 배치·색상만 다룬다. */
+.report-save-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.report-save-feedback {
+  min-height: 1.5em;
+}
+
+.report-save-feedback__success {
+  margin: 0;
+  color: var(--color-success);
+  font-weight: 600;
+}

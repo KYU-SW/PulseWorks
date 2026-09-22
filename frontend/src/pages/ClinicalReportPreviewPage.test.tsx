@@ -517,6 +517,199 @@ describe("ClinicalReportPreviewPage", () => {
     resolvePatch({ ok: true, status: 200, json: async () => SAMPLE_REPORT, text: async () => "" });
   });
 
+  // ============== Task 20 후속: 저장 성공/실패 피드백 개선 ==============
+
+  it("shows a success message with role=status (not role=alert) after a successful save, and updates last_modified_at from the response", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const patchedReport = {
+      ...SAMPLE_REPORT,
+      content: { ...SAMPLE_REPORT.content, narrative: "의사가 작성한 설명" },
+      last_modified_at: "2026-09-20T03:00:00Z",
+    };
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      const isPatch = options?.method === "PATCH";
+      const body = isPatch ? patchedReport : SAMPLE_REPORT;
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    const lastModifiedBefore = screen.getByText(/마지막 수정일/).textContent;
+    await user.type(screen.getByLabelText("설명문"), "의사가 작성한 설명");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    const success = await screen.findByText("저장되었습니다.");
+    expect(success).toHaveAttribute("role", "status");
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+    // 버튼 자체는 "저장"으로 복귀해도 된다 — 성공 안내는 별도 메시지로 전달한다.
+    expect(screen.getByRole("button", { name: "저장" })).toBeInTheDocument();
+    expect(screen.getByText(/마지막 수정일/).textContent).not.toBe(lastModifiedBefore);
+  });
+
+  it("keeps the success message inside an aria-live=polite region", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      const isPatch = options?.method === "PATCH";
+      const body = isPatch
+        ? { ...SAMPLE_REPORT, content: { ...SAMPLE_REPORT.content, narrative: "x" } }
+        : SAMPLE_REPORT;
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.type(screen.getByLabelText("설명문"), "x");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    const success = await screen.findByText("저장되었습니다.");
+    expect(success.closest(".report-save-feedback")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("keeps the entered values on screen after a successful save", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const patchedReport = {
+      ...SAMPLE_REPORT,
+      content: {
+        ...SAMPLE_REPORT.content,
+        narrative: "저장 후에도 남아있는 설명",
+        patient_guidance: "저장 후에도 남아있는 안내문",
+      },
+    };
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      const isPatch = options?.method === "PATCH";
+      const body = isPatch ? patchedReport : SAMPLE_REPORT;
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.type(screen.getByLabelText("설명문"), "저장 후에도 남아있는 설명");
+    await user.type(screen.getByLabelText("환자 안내문"), "저장 후에도 남아있는 안내문");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    await screen.findByText("저장되었습니다.");
+    expect(screen.getByLabelText("설명문")).toHaveValue("저장 후에도 남아있는 설명");
+    expect(screen.getByLabelText("환자 안내문")).toHaveValue("저장 후에도 남아있는 안내문");
+  });
+
+  it("removes the previous success message as soon as the user edits a field again", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const patchedReport = {
+      ...SAMPLE_REPORT,
+      content: { ...SAMPLE_REPORT.content, narrative: "첫 저장 내용" },
+    };
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      const isPatch = options?.method === "PATCH";
+      const body = isPatch ? patchedReport : SAMPLE_REPORT;
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.type(screen.getByLabelText("설명문"), "첫 저장 내용");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    await screen.findByText("저장되었습니다.");
+
+    await user.type(screen.getByLabelText("설명문"), " 추가 수정");
+
+    expect(screen.queryByText("저장되었습니다.")).not.toBeInTheDocument();
+  });
+
+  it("allows a normal second save after a first successful save", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    let currentNarrative = "첫 저장";
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      const isPatch = options?.method === "PATCH";
+      if (isPatch) {
+        const sent = JSON.parse((options!.body as string));
+        currentNarrative = sent.narrative;
+      }
+      const body = { ...SAMPLE_REPORT, content: { ...SAMPLE_REPORT.content, narrative: currentNarrative } };
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.type(screen.getByLabelText("설명문"), "첫 저장");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    await screen.findByText("저장되었습니다.");
+
+    await user.clear(screen.getByLabelText("설명문"));
+    await user.type(screen.getByLabelText("설명문"), "두 번째 저장");
+    expect(screen.queryByText("저장되었습니다.")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    await screen.findByText("저장되었습니다.");
+
+    const patchCalls = fetchMock.mock.calls.filter(
+      (call: any[]) => (call[1] as RequestInit)?.method === "PATCH"
+    );
+    expect(patchCalls).toHaveLength(2);
+  });
+
+  it("shows no success message and keeps the existing error alert when a save fails", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      const isPatch = options?.method === "PATCH";
+      if (isPatch) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ detail: "boom" }), text: async () => "" });
+      }
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => SAMPLE_REPORT, text: async () => JSON.stringify(SAMPLE_REPORT),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.type(screen.getByLabelText("설명문"), "실패할 저장");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("보고서를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    expect(screen.queryByText("저장되었습니다.")).not.toBeInTheDocument();
+    // 입력값은 실패 후에도 유지된다.
+    expect(screen.getByLabelText("설명문")).toHaveValue("실패할 저장");
+  });
+
+  it("does not render the save button or a success message for an APPROVED report", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const approvedReport = {
+      ...SAMPLE_REPORT,
+      status: "APPROVED",
+      reviewed_by_user_id: 1,
+      reviewed_at: "2026-09-19T00:00:00Z",
+      content: { ...SAMPLE_REPORT.content, narrative: "승인된 설명문" },
+    };
+    vi.stubGlobal("fetch", mockFetchOnce(200, approvedReport));
+    renderPreviewPage();
+
+    await screen.findByText("진료참고 보고서");
+    expect(screen.queryByRole("button", { name: "저장" })).not.toBeInTheDocument();
+    expect(screen.queryByText("저장되었습니다.")).not.toBeInTheDocument();
+  });
+
   it("shows an inline two-step confirmation before approving, and cancel returns to idle", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
     const withNarrative = {

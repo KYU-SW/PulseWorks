@@ -69,6 +69,7 @@ export default function ClinicalReportPreviewPage() {
   const [editablePatientGuidance, setEditablePatientGuidance] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSucceeded, setSaveSucceeded] = useState(false);
 
   const [approveStep, setApproveStep] = useState<ConfirmStep>("idle");
   const [isApproving, setIsApproving] = useState(false);
@@ -133,6 +134,7 @@ export default function ClinicalReportPreviewPage() {
   async function handleSave() {
     if (!report || isSaving) return; // 중복 요청 방지
     setSaveError(null);
+    setSaveSucceeded(false); // 새 저장 시작 전 이전 성공 안내를 지운다.
     setIsSaving(true);
     try {
       const updated = await patchClinicalReport(report.id, {
@@ -141,12 +143,19 @@ export default function ClinicalReportPreviewPage() {
         patient_guidance: blankToNull(editablePatientGuidance),
       });
       setReport(updated);
+      setSaveSucceeded(true);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return;
       setSaveError(GENERIC_SAVE_ERROR);
     } finally {
       setIsSaving(false);
     }
+  }
+
+  // 세 필드 중 하나라도 다시 수정하면 이전 저장 성공 안내를 지운다.
+  function handleEditableFieldChange(setField: (value: string) => void, value: string) {
+    setField(value);
+    setSaveSucceeded(false);
   }
 
   async function handleApproveConfirmed() {
@@ -157,6 +166,7 @@ export default function ClinicalReportPreviewPage() {
       const updated = await approveClinicalReport(report.id);
       setReport(updated);
       setApproveStep("idle");
+      setSaveSucceeded(false); // APPROVED가 되면 저장 편집 영역 자체가 사라지므로 상태도 정리한다.
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return;
       // 409는 "설명문을 먼저 작성/생성하세요" 같은 사용자가 바로 행동할 수
@@ -289,7 +299,7 @@ export default function ClinicalReportPreviewPage() {
                 <textarea
                   id="narrative-textarea"
                   value={editableNarrative}
-                  onChange={(e) => setEditableNarrative(e.target.value)}
+                  onChange={(e) => handleEditableFieldChange(setEditableNarrative, e.target.value)}
                   disabled={anyActionInFlight}
                 />
               </FormField>
@@ -298,7 +308,7 @@ export default function ClinicalReportPreviewPage() {
                 <textarea
                   id="handoff-note-textarea"
                   value={editableHandoffNote}
-                  onChange={(e) => setEditableHandoffNote(e.target.value)}
+                  onChange={(e) => handleEditableFieldChange(setEditableHandoffNote, e.target.value)}
                   disabled={anyActionInFlight}
                 />
               </FormField>
@@ -307,19 +317,29 @@ export default function ClinicalReportPreviewPage() {
                 <textarea
                   id="patient-guidance-textarea"
                   value={editablePatientGuidance}
-                  onChange={(e) => setEditablePatientGuidance(e.target.value)}
+                  onChange={(e) => handleEditableFieldChange(setEditablePatientGuidance, e.target.value)}
                   disabled={anyActionInFlight}
                 />
               </FormField>
 
-              <Button
-                variant="primary"
-                onClick={handleSave}
-                disabled={anyActionInFlight}
-                loading={isSaving}
-              >
-                {isSaving ? "저장하는 중..." : "저장"}
-              </Button>
+              <div className="report-save-actions">
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={handleSave}
+                  disabled={anyActionInFlight}
+                  loading={isSaving}
+                >
+                  {isSaving ? "저장하는 중..." : "저장"}
+                </Button>
+                <div className="report-save-feedback" aria-live="polite">
+                  {saveSucceeded && (
+                    <p className="report-save-feedback__success" role="status">
+                      저장되었습니다.
+                    </p>
+                  )}
+                </div>
+              </div>
               {saveError && (
                 <AlertBox variant="error" role="alert">
                   {saveError}
