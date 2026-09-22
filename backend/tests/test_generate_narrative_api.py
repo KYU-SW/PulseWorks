@@ -72,7 +72,13 @@ def test_assigned_doctor_generates_narrative_and_only_narrative_changes(db_sessi
     assert response.status_code == 200
     body = response.json()
     assert body["content"]["narrative"] is not None
-    assert "의료진의 검토가 필요합니다" in body["content"]["narrative"]
+    # Task 20C 후속 보완: 환자에게도 그대로 공개되는 narrative라서, 기존의
+    # "초안이며 의료진의 검토가 필요합니다" 문구는 승인 후 상태와
+    # 모순되므로 제거됐다 — 승인 후에도 모순되지 않는 안내로 끝난다.
+    assert (
+        "검사결과와 처방의 의미는 담당 의료진 또는 약사에게 확인하세요."
+        in body["content"]["narrative"]
+    )
     assert body["content"]["emr_snapshot"] == original_emr_snapshot
     assert body["content"]["handoff_note"] is None
     assert body["content"]["patient_guidance"] is None
