@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import PatientLabTrendGroupView from "./PatientLabTrendGroupView";
 import { PatientLabTrendGroup } from "../../api/patientReports";
@@ -45,6 +46,20 @@ describe("PatientLabTrendGroupView", () => {
   it("wraps the chart/card area in the shared Card component", () => {
     const { container } = render(<PatientLabTrendGroupView group={MULTI_POINT_GROUP} />);
     expect(container.querySelector(".ui-card")).not.toBeNull();
+  });
+
+  // 재현: h3(제목)는 phrasing content만 허용하는데, MedicalTermButton이
+  // 열릴 때 형제로 렌더링하는 <dialog>(flow content)가 지금은 h3 안에
+  // 그대로 들어간다 — 이 테스트로 그 실제 DOM 구조를 먼저 확인한다.
+  it("never renders the native dialog as a descendant of the h3 heading", async () => {
+    render(<PatientLabTrendGroupView group={MULTI_POINT_GROUP} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /HbA1c/ }));
+
+    const dialog = screen.getByRole("dialog", { hidden: true });
+    const heading = screen.getByRole("heading", { level: 3 });
+    expect(heading.contains(dialog)).toBe(false);
   });
 
   it("renders nothing for an empty points array", () => {

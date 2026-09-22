@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { MedicalTerm } from "../../medicalTerms/types";
 import MedicalTermDialog from "./MedicalTermDialog";
 
@@ -27,9 +28,14 @@ export default function MedicalTermButton({ term, children }: MedicalTermButtonP
         <span style={{ textDecoration: "underline" }}>{children}</span>
         <span aria-hidden="true"> ⓘ</span>
       </button>
-      {open && (
-        <MedicalTermDialog term={term} onClosed={() => setOpen(false)} returnFocusRef={triggerRef} />
-      )}
+      {/* h3 등 phrasing content만 허용하는 조상 안에서도 안전하도록,
+          dialog(flow content)는 트리거 위치가 아니라 document.body에
+          렌더링한다 — MedicalTermDialog 로직은 변경하지 않는다. */}
+      {open &&
+        createPortal(
+          <MedicalTermDialog term={term} onClosed={() => setOpen(false)} returnFocusRef={triggerRef} />,
+          document.body
+        )}
     </>
   );
 }
