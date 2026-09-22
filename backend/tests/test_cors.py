@@ -66,3 +66,52 @@ def test_allow_credentials_is_disabled():
     )
 
     assert "access-control-allow-credentials" not in {k.lower() for k in response.headers.keys()}
+
+
+# PATCH preflight (보고서 저장 시 실제로 브라우저가 보내는 요청) 회귀 —
+# allow_methods에 PATCH가 빠져 있으면 CORSMiddleware가 이 요청을 400으로
+# 거부한다("Disallowed CORS method").
+def test_patch_preflight_from_allowed_origin_succeeds_with_patch_in_allow_methods():
+    response = client.options(
+        "/reports/1",
+        headers={
+            "Origin": ALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "authorization, content-type",
+        },
+    )
+
+    assert response.status_code < 300
+    assert response.headers["access-control-allow-origin"] == ALLOWED_ORIGIN
+    allowed_methods = {m.strip() for m in response.headers["access-control-allow-methods"].split(",")}
+    assert "PATCH" in allowed_methods
+    # 기존 허용 메서드는 그대로 유지된다.
+    assert {"GET", "POST", "OPTIONS"}.issubset(allowed_methods)
+
+
+def test_patch_preflight_still_allows_authorization_and_content_type_headers():
+    response = client.options(
+        "/reports/1",
+        headers={
+            "Origin": ALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "authorization, content-type",
+        },
+    )
+
+    allowed_headers = {h.strip().lower() for h in response.headers["access-control-allow-headers"].split(",")}
+    assert "authorization" in allowed_headers
+    assert "content-type" in allowed_headers
+
+
+def test_patch_preflight_from_disallowed_origin_gets_no_cors_header():
+    response = client.options(
+        "/reports/1",
+        headers={
+            "Origin": DISALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "authorization, content-type",
+        },
+    )
+
+    assert "access-control-allow-origin" not in {k.lower() for k in response.headers.keys()}
