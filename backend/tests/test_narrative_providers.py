@@ -7,6 +7,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.core.config import Settings
 from app.schemas.clinical_report import EmrSnapshot
+from app.schemas.narrative_provider import LlmStructuredOutput
 from app.services.mock_narrative import generate_mock_report_narrative
 from app.services.narrative_providers.base import (
     MentionedMeasurement,
@@ -74,6 +75,26 @@ def _full_snapshot() -> EmrSnapshot:
             }
         ],
     )
+
+
+# ============================== LlmStructuredOutput 스키마 (evidence_tags) =======
+
+
+class TestLlmStructuredOutputEvidenceTagsSchema:
+    def test_evidence_tags_is_required(self):
+        schema = LlmStructuredOutput.model_json_schema()
+        assert "evidence_tags" in schema["required"]
+
+    def test_evidence_tags_has_min_items_one(self):
+        schema = LlmStructuredOutput.model_json_schema()
+        assert schema["properties"]["evidence_tags"]["minItems"] == 1
+
+    def test_evidence_tags_has_a_non_empty_description(self):
+        schema = LlmStructuredOutput.model_json_schema()
+        description = schema["properties"]["evidence_tags"]["description"]
+        assert "최소 1개 이상" in description
+        assert "[사용 가능한 태그]" in description
+        assert "새 태그를 만들지 않는다" in description
 
 
 # ============================== build_narrative_prompt (익명 근거 태그) =========
@@ -145,6 +166,56 @@ class TestBuildNarrativePrompt:
         assert not any(tag.startswith("S") or tag.startswith("C") for tag in prompt.tag_to_source_record_id)
         assert "LAB_REFERENCE_RANGE" not in prompt.text
         assert "미리보기" not in prompt.text
+
+    def test_allowed_tags_block_lists_every_tag_in_the_map(self):
+        snapshot = _full_snapshot()
+        prompt = build_narrative_prompt(snapshot)
+
+        allowed_line = next(line for line in prompt.text.splitlines() if line.startswith("[사용 가능한 태그]"))
+        for tag in prompt.tag_to_source_record_id:
+            assert tag in allowed_line
+
+    def test_allowed_tags_block_is_positioned_after_all_data_sections(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+        lines = prompt.text.splitlines()
+
+        allowed_index = next(i for i, line in enumerate(lines) if line.startswith("[사용 가능한 태그]"))
+        last_data_tag_index = max(
+            i for i, line in enumerate(lines) if any(f"[{tag}]" in line for tag in ("E1", "D1", "L1", "P1", "A1"))
+        )
+        assert allowed_index > last_data_tag_index
+
+    def test_evidence_tags_reminder_appears_after_the_allowed_tags_block(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+        lines = prompt.text.splitlines()
+
+        allowed_index = next(i for i, line in enumerate(lines) if line.startswith("[사용 가능한 태그]"))
+        reminder_index = next(
+            i for i, line in enumerate(lines) if "최소 1개 이상 포함하라" in line
+        )
+        assert reminder_index > allowed_index
+
+    def test_missing_data_types_contribute_no_tags_to_the_allowed_list(self):
+        # 진단·처방·알레르기가 전부 0건인 스냅샷 - D/P/A 태그가 전혀
+        # 생성되지 않고, [사용 가능한 태그]에도 등장하지 않아야 한다.
+        snapshot = _snapshot(diagnoses=[], prescriptions=[], allergies=[])
+        prompt = build_narrative_prompt(snapshot)
+
+        allowed_line = next(line for line in prompt.text.splitlines() if line.startswith("[사용 가능한 태그]"))
+        assert "D1" not in allowed_line
+        assert "P1" not in allowed_line
+        assert "A1" not in allowed_line
+        assert not any(tag.startswith(("D", "P", "A")) for tag in prompt.tag_to_source_record_id)
+
+    def test_allowed_tags_order_is_deterministic_for_the_same_snapshot(self):
+        snapshot = _full_snapshot()
+
+        first = build_narrative_prompt(snapshot)
+        second = build_narrative_prompt(snapshot)
+
+        first_line = next(line for line in first.text.splitlines() if line.startswith("[사용 가능한 태그]"))
+        second_line = next(line for line in second.text.splitlines() if line.startswith("[사용 가능한 태그]"))
+        assert first_line == second_line
 
 
 # ============================== DeterministicMockProvider ===================
@@ -295,6 +366,10 @@ class TestEvidenceTagResolution:
         assert exc_info.value.code == "LLM_EVIDENCE_TAG_UNKNOWN"
 
     def test_rejects_an_empty_evidence_tags_list(self):
+        # evidence_tags는 이제 min_length=1이라 빈 배열은 RealLLMProvider의
+        # _resolve_evidence_tags에 도달하기 전에 LlmStructuredOutput
+        # 파싱(Pydantic) 단계에서 먼저 거부된다 - 그래서 코드가
+        # LLM_EVIDENCE_TAGS_EMPTY가 아니라 LLM_OUTPUT_INVALID_JSON이다.
         client = _FakeLlmHttpClient(
             response='{"narrative": "x", "evidence_tags": [], "mentioned_measurements": []}'
         )
@@ -302,6 +377,30 @@ class TestEvidenceTagResolution:
 
         with pytest.raises(NarrativeProviderError) as exc_info:
             provider.generate(_snapshot())
+        assert exc_info.value.code == "LLM_OUTPUT_INVALID_JSON"
+
+    def test_rejects_a_response_missing_the_evidence_tags_key_entirely(self):
+        # evidence_tags가 필수 필드로 바뀌었으므로, 키 자체가 없는
+        # 응답(과거에는 기본값 빈 리스트로 조용히 통과했다)도 이제는
+        # 거부된다.
+        client = _FakeLlmHttpClient(
+            response='{"narrative": "x", "mentioned_measurements": []}'
+        )
+        provider = RealLLMProvider(client=client, model="test-model", max_output_tokens=500, timeout_seconds=10)
+
+        with pytest.raises(NarrativeProviderError) as exc_info:
+            provider.generate(_snapshot())
+        assert exc_info.value.code == "LLM_OUTPUT_INVALID_JSON"
+
+    def test_resolve_evidence_tags_helper_still_rejects_an_empty_list_directly(self):
+        # RealLLMProvider._resolve_evidence_tags()의 빈 목록 거부는
+        # Pydantic 스키마를 우회해 직접 이 함수를 호출하는 경로에서도
+        # 안전해야 한다는 defense-in-depth를 그대로 유지한다 - 이 함수를
+        # 직접 호출해 삭제/완화되지 않았음을 재확인한다.
+        from app.services.narrative_providers.real_llm_provider import _resolve_evidence_tags
+
+        with pytest.raises(NarrativeProviderError) as exc_info:
+            _resolve_evidence_tags([], {"L1": "lab_result:1"})
         assert exc_info.value.code == "LLM_EVIDENCE_TAGS_EMPTY"
 
     def test_a_single_invalid_tag_rejects_the_whole_result_even_if_others_are_valid(self):
@@ -394,7 +493,10 @@ class TestGetNarrativeProvider:
     # --- Task B: 벤더 분기 -------------------------------------------------
 
     def test_llm_without_a_vendor_is_rejected_and_does_not_guess_ollama(self):
-        settings = Settings(narrative_provider="llm", llm_model="qwen3:8b")
+        # llm_vendor를 명시적으로 빈 문자열로 준다 - 지정하지 않으면
+        # pydantic-settings가 실제 backend/.env의 LLM_VENDOR 값을 그대로
+        # 읽어와 이 테스트가 로컬 .env 상태에 좌우될 수 있다.
+        settings = Settings(narrative_provider="llm", llm_model="qwen3:8b", llm_vendor="")
         with pytest.raises(NarrativeProviderError) as exc_info:
             get_narrative_provider(settings)
         assert exc_info.value.code == "LLM_VENDOR_MISSING"
@@ -408,7 +510,11 @@ class TestGetNarrativeProvider:
         assert exc_info.value.code == "LLM_VENDOR_UNSUPPORTED"
 
     def test_ollama_without_base_url_is_rejected(self):
-        settings = Settings(narrative_provider="llm", llm_vendor="ollama", llm_model="qwen3:8b")
+        # llm_base_url을 명시적으로 빈 문자열로 준다 - 같은 이유로 실제
+        # .env의 LLM_BASE_URL에 좌우되지 않게 한다.
+        settings = Settings(
+            narrative_provider="llm", llm_vendor="ollama", llm_model="qwen3:8b", llm_base_url=""
+        )
         with pytest.raises(NarrativeProviderError) as exc_info:
             get_narrative_provider(settings)
         assert exc_info.value.code == "LLM_BASE_URL_MISSING"
