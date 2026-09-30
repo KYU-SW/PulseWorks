@@ -148,12 +148,29 @@ class ReportContentSnapshot(BaseModel):
     """ClinicalReport.content 컬럼에 저장되는 전체 구조.
     collect_report_data() -> EmrSnapshot.model_validate() -> 이 스키마로
     감싸서 model_dump(mode="json")한 결과가 그대로 저장된다. 조회 시에도
-    저장된 dict를 다시 이 스키마로 검증한 뒤 응답한다."""
+    저장된 dict를 다시 이 스키마로 검증한 뒤 응답한다.
+
+    Task D1(narrative 출처 표시): narrative_source/narrative_edited_by_clinician은
+    선택적 필드라 Migration이 필요 없다 - 이 필드가 없는 기존 JSON도
+    기본값(None/False)으로 그대로 파싱된다. 의사용 ClinicalReportOut.content가
+    이 스키마를 그대로 쓰므로 의사 화면에는 자동으로 노출되지만,
+    환자용 스키마(app/schemas/patient_report.py)는 필드를 하나하나
+    별도로 나열하는 완전히 다른 클래스라 이 필드들을 추가하지 않는 한
+    환자 API에는 절대 새지 않는다."""
 
     emr_snapshot: EmrSnapshot
     narrative: str | None = None
     handoff_note: str | None = None
     patient_guidance: str | None = None
+    # "mock"(DeterministicMockProvider) | "llm"(RealLLMProvider, 벤더 무관) |
+    # "clinician"(비어 있던 narrative를 의료진이 처음 작성) | None(기존
+    # 보고서처럼 최초 출처를 정확히 알 수 없음 - 감사 로그를 역추적해
+    # 추측하지 않는다).
+    narrative_source: str | None = None
+    # 최초 생성 이후 의료진이 narrative 내용을 실제로 바꾼 적이 있는지.
+    # narrative_source와 별개로 관리한다 - "AI가 초안을 만들었다"는
+    # 사실과 "의료진이 그 초안을 수정했다"는 사실을 둘 다 표현하기 위함.
+    narrative_edited_by_clinician: bool = False
 
 
 # --- 요청/응답 스키마 -----------------------------------------------------

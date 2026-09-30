@@ -277,21 +277,26 @@ def generate_report_narrative(
         # 아직 아무것도 쓰지 않았다.
         raise HTTPException(status_code=502, detail=_NARRATIVE_VALIDATION_FAILED_MESSAGE)
 
+    # Task D1: provider_result.provider 값(이미 존재하는 계약)을 그대로
+    # 재사용한다 - vendor 이름을 직접 비교하지 않으므로 향후 다른 LLM
+    # 벤더 Adapter가 붙어도 이 분기는 그대로다. 새로 생성된 초안은
+    # 아직 의료진이 손대지 않았으므로 edited는 항상 False로 시작한다.
+    is_mock_result = provider_result.provider == "DETERMINISTIC_MOCK"
+    narrative_source = "mock" if is_mock_result else "llm"
+
     new_content = ReportContentSnapshot(
         emr_snapshot=content.emr_snapshot,
         narrative=provider_result.narrative,
         handoff_note=content.handoff_note,
         patient_guidance=content.patient_guidance,
+        narrative_source=narrative_source,
+        narrative_edited_by_clinician=False,
     )
 
     now = datetime.now(timezone.utc)
     # Mock 성공은 Task 16의 기존 문구를 그대로 유지한다 — mock 기본값에서
     # 감사 로그가 조금이라도 달라지면 안 된다.
-    audit_reason = (
-        "deterministic_mock_narrative"
-        if provider_result.provider == "DETERMINISTIC_MOCK"
-        else "llm_generated_narrative"
-    )
+    audit_reason = "deterministic_mock_narrative" if is_mock_result else "llm_generated_narrative"
 
     try:
         existing_summary = _find_reusable_ai_summary(
@@ -364,11 +369,36 @@ def patch_clinical_report(
 
     content = ReportContentSnapshot.model_validate(report.content)
     provided_fields = body.model_dump(exclude_unset=True)
+    new_narrative = provided_fields.get("narrative", content.narrative)
+
+    # Task D1: narrative_source/edited는 narrative 필드가 실제로 값을
+    # 바꿀 때만 갱신한다 - handoff_note/patient_guidance만 바뀌거나
+    # narrative가 정규화 후에도 이전과 같으면 두 값 다 그대로 둔다.
+    # narrative가 바뀌는 경우: 이전 narrative가 비어 있었다면(최초 작성)
+    # "clinician"으로 새로 채우고 edited는 여전히 False(수정이 아니라
+    # 작성이므로) - 이전 narrative가 있었다면(mock/llm/None 중 무엇이든)
+    # 그 출처는 그대로 보존하고 edited만 True로 올린다. narrative_source가
+    # 이미 None(출처 불명)인 채로 남아 있었다면, 이번에 고쳤다는 이유만
+    # 으로 clinician으로 바꾸지 않는다 - 최초 출처를 알 수 없다는 사실
+    # 자체는 여전히 사실이기 때문이다.
+    narrative_changed = "narrative" in provided_fields and new_narrative != content.narrative
+    if not narrative_changed:
+        new_narrative_source = content.narrative_source
+        new_narrative_edited = content.narrative_edited_by_clinician
+    elif content.narrative is None:
+        new_narrative_source = "clinician"
+        new_narrative_edited = False
+    else:
+        new_narrative_source = content.narrative_source
+        new_narrative_edited = True
+
     new_content = ReportContentSnapshot(
         emr_snapshot=content.emr_snapshot,
-        narrative=provided_fields.get("narrative", content.narrative),
+        narrative=new_narrative,
         handoff_note=provided_fields.get("handoff_note", content.handoff_note),
         patient_guidance=provided_fields.get("patient_guidance", content.patient_guidance),
+        narrative_source=new_narrative_source,
+        narrative_edited_by_clinician=new_narrative_edited,
     )
 
     now = datetime.now(timezone.utc)

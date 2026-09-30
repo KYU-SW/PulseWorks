@@ -70,6 +70,8 @@ const SAMPLE_REPORT = {
     narrative: null,
     handoff_note: null,
     patient_guidance: null,
+    narrative_source: null,
+    narrative_edited_by_clinician: false,
   },
   created_by_user_id: 1,
   created_at: "2026-09-18T00:00:00Z",
@@ -339,14 +341,15 @@ describe("ClinicalReportPreviewPage", () => {
     expect(document.body.textContent).not.toContain("SELECT");
   });
 
-  // Mock 설명문 생성 버튼: narrative가 null이고 DRAFT일 때만 표시
-  it("shows the Mock narrative generation button only when DRAFT and narrative is null", async () => {
+  // 공통 생성 버튼: narrative가 null이고 DRAFT일 때만 표시(Task D1 —
+  // Provider 종류와 무관하게 항상 같은 문구).
+  it("shows the common narrative generation button only when DRAFT and narrative is null", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
     vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
     renderPreviewPage();
 
     expect(
-      await screen.findByRole("button", { name: "Mock 설명문 생성" })
+      await screen.findByRole("button", { name: "설명문 초안 생성" })
     ).toBeInTheDocument();
   });
 
@@ -354,35 +357,50 @@ describe("ClinicalReportPreviewPage", () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
     const withNarrative = {
       ...SAMPLE_REPORT,
-      content: { ...SAMPLE_REPORT.content, narrative: "이미 생성된 설명문입니다." },
+      content: {
+        ...SAMPLE_REPORT.content,
+        narrative: "이미 생성된 설명문입니다.",
+        narrative_source: "mock",
+      },
     };
     vi.stubGlobal("fetch", mockFetchOnce(200, withNarrative));
     renderPreviewPage();
 
     await screen.findByText("진료참고 보고서");
-    expect(screen.queryByRole("button", { name: "Mock 설명문 생성" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "설명문 초안 생성" })).not.toBeInTheDocument();
     // DRAFT에서는 narrative가 편집 가능한 textarea에 표시된다(Task 17).
     expect(screen.getByDisplayValue("이미 생성된 설명문입니다.")).toBeInTheDocument();
   });
 
-  it("disables the button while generating, prevents duplicate clicks, and updates in place on success", async () => {
+  it("disables the button while generating, prevents duplicate clicks, updates in place, and shows success on generation", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
     const generatedReport = {
       ...SAMPLE_REPORT,
-      content: { ...SAMPLE_REPORT.content, narrative: "생성된 Mock 설명문 초안입니다." },
+      content: {
+        ...SAMPLE_REPORT.content,
+        narrative: "생성된 설명문 초안입니다.",
+        narrative_source: "mock",
+      },
     };
     const fetchMock = mockFetchRouter({ get: SAMPLE_REPORT, post: generatedReport });
     vi.stubGlobal("fetch", fetchMock);
     renderPreviewPage();
     const user = userEvent.setup();
 
-    const button = await screen.findByRole("button", { name: "Mock 설명문 생성" });
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
     await user.click(button);
 
     // 생성 중에는 버튼이 비활성화되고 문구가 바뀐다(요청이 동기적으로
     // 즉시 끝나므로 최종 성공 상태까지 함께 확인한다).
-    await screen.findByDisplayValue("생성된 Mock 설명문 초안입니다.");
-    expect(screen.queryByRole("button", { name: "Mock 설명문 생성" })).not.toBeInTheDocument();
+    await screen.findByDisplayValue("생성된 설명문 초안입니다.");
+    expect(screen.queryByRole("button", { name: "설명문 초안 생성" })).not.toBeInTheDocument();
+
+    // 생성 성공 안내: role=status, aria-live=polite, role=alert 아님.
+    const success = screen.getByText(
+      "설명문 초안이 생성되었습니다. 내용을 검토한 뒤 저장하거나 승인하세요."
+    );
+    expect(success).toHaveAttribute("role", "status");
+    expect(success.closest(".report-save-feedback")).toHaveAttribute("aria-live", "polite");
 
     const postCalls = fetchMock.mock.calls.filter(
       (call: any[]) => (call[1] as RequestInit)?.method === "POST"
@@ -391,19 +409,76 @@ describe("ClinicalReportPreviewPage", () => {
     expect(String(postCalls[0][0])).toContain("/reports/42/generate-narrative");
   });
 
-  it("shows a generic error and keeps the button usable when generation fails", async () => {
+  it("removes the previous generation success message once the user edits a field", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const generatedReport = {
+      ...SAMPLE_REPORT,
+      content: { ...SAMPLE_REPORT.content, narrative: "생성된 설명문", narrative_source: "mock" },
+    };
+    const fetchMock = mockFetchRouter({ get: SAMPLE_REPORT, post: generatedReport });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "설명문 초안 생성" }));
+    await screen.findByText("설명문 초안이 생성되었습니다. 내용을 검토한 뒤 저장하거나 승인하세요.");
+
+    await user.type(screen.getByLabelText("설명문"), " 추가 수정");
+
+    expect(
+      screen.queryByText("설명문 초안이 생성되었습니다. 내용을 검토한 뒤 저장하거나 승인하세요.")
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the generic error and keeps the button usable when generation fails with an unexpected status", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
     const fetchMock = mockFetchRouter({ get: SAMPLE_REPORT, post: { detail: "boom" }, postStatus: 500 });
     vi.stubGlobal("fetch", fetchMock);
     renderPreviewPage();
     const user = userEvent.setup();
 
-    const button = await screen.findByRole("button", { name: "Mock 설명문 생성" });
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
     await user.click(button);
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("설명문을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
-    expect(screen.getByRole("button", { name: "Mock 설명문 생성" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "설명문 초안 생성" })).not.toBeDisabled();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("shows the backend's safe service-unavailable message on a 503", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = mockFetchRouter({
+      get: SAMPLE_REPORT,
+      post: { detail: "설명문 생성 서비스를 사용할 수 없습니다." },
+      postStatus: 503,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "설명문 초안 생성" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("설명문 생성 서비스를 사용할 수 없습니다.");
+  });
+
+  it("shows the backend's validation-failure message plus a no-change reassurance on a 502", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = mockFetchRouter({
+      get: SAMPLE_REPORT,
+      post: { detail: "생성된 설명문이 검증을 통과하지 못했습니다." },
+      postStatus: 502,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "설명문 초안 생성" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("생성된 설명문이 검증을 통과하지 못했습니다.");
+    expect(alert).toHaveTextContent("보고서 내용은 변경되지 않았습니다.");
   });
 
   it("never renders the generation button as a PDF or Word export action", async () => {
@@ -411,9 +486,102 @@ describe("ClinicalReportPreviewPage", () => {
     vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
     renderPreviewPage();
 
-    await screen.findByRole("button", { name: "Mock 설명문 생성" });
+    await screen.findByRole("button", { name: "설명문 초안 생성" });
     for (const forbiddenName of [/PDF/, /다운로드/, /Word/]) {
       expect(screen.queryByRole("button", { name: forbiddenName })).not.toBeInTheDocument();
+    }
+  });
+
+  // ======================= Task D1: narrative 출처 문구 =====================
+
+  function withNarrativeSource(source: string | null, edited: boolean) {
+    return {
+      ...SAMPLE_REPORT,
+      content: {
+        ...SAMPLE_REPORT.content,
+        narrative: "이미 생성된 설명문입니다.",
+        narrative_source: source,
+        narrative_edited_by_clinician: edited,
+      },
+    };
+  }
+
+  it("shows the mock+unedited source notice", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, withNarrativeSource("mock", false)));
+    renderPreviewPage();
+
+    expect(await screen.findByText("결정적 Mock 기반 검토 전 초안")).toBeInTheDocument();
+    expect(screen.getByText("의료진 검토 전에는 환자에게 공개되지 않습니다.")).toBeInTheDocument();
+  });
+
+  it("shows the mock+edited source notice", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, withNarrativeSource("mock", true)));
+    renderPreviewPage();
+
+    expect(
+      await screen.findByText("Mock 초안을 바탕으로 의료진이 수정한 내용")
+    ).toBeInTheDocument();
+    expect(screen.getByText("의료진 승인 전에는 환자에게 공개되지 않습니다.")).toBeInTheDocument();
+  });
+
+  it("shows the llm+unedited source notice", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, withNarrativeSource("llm", false)));
+    renderPreviewPage();
+
+    expect(await screen.findByText("AI로 생성된 검토 전 초안")).toBeInTheDocument();
+    expect(screen.getByText("의료진 검토 전에는 환자에게 공개되지 않습니다.")).toBeInTheDocument();
+  });
+
+  it("shows the llm+edited source notice", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, withNarrativeSource("llm", true)));
+    renderPreviewPage();
+
+    expect(
+      await screen.findByText("AI 초안을 바탕으로 의료진이 수정한 내용")
+    ).toBeInTheDocument();
+    expect(screen.getByText("의료진 승인 전에는 환자에게 공개되지 않습니다.")).toBeInTheDocument();
+  });
+
+  it("shows the clinician-authored source notice", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, withNarrativeSource("clinician", false)));
+    renderPreviewPage();
+
+    expect(await screen.findByText("의료진이 직접 작성한 검토 전 내용")).toBeInTheDocument();
+    expect(screen.getByText("승인 전에는 환자에게 공개되지 않습니다.")).toBeInTheDocument();
+  });
+
+  it("shows the unknown-source notice when narrative_source is null", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, withNarrativeSource(null, false)));
+    renderPreviewPage();
+
+    expect(await screen.findByText("의료진 검토 전 초안")).toBeInTheDocument();
+    expect(screen.getByText("승인 전에는 환자에게 공개되지 않습니다.")).toBeInTheDocument();
+  });
+
+  it("shows the unknown-source notice for an unexpected source value instead of guessing", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, withNarrativeSource("some_future_vendor", false)));
+    renderPreviewPage();
+
+    expect(await screen.findByText("의료진 검토 전 초안")).toBeInTheDocument();
+    // 실제 vendor 이름이나 추측한 출처를 화면에 노출하지 않는다.
+    expect(screen.queryByText(/some_future_vendor/)).not.toBeInTheDocument();
+  });
+
+  it("never shows vendor, model, or internal provider strings on the doctor screen", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, withNarrativeSource("llm", false)));
+    renderPreviewPage();
+
+    await screen.findByText("AI로 생성된 검토 전 초안");
+    for (const forbidden of ["Ollama", "qwen3", "DETERMINISTIC_MOCK", "RealLLMProvider"]) {
+      expect(document.body.textContent).not.toContain(forbidden);
     }
   });
 

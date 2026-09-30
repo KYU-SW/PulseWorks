@@ -100,6 +100,38 @@ def test_narrative_fields_default_to_none(db_session):
     assert dumped["patient_guidance"] is None
 
 
+# Task D1: narrative_source/narrative_edited_by_clinician - 선택적
+# 메타데이터라 Migration 없이 기존 JSON도 기본값으로 파싱된다.
+def test_narrative_source_and_edited_default_when_absent_from_stored_json(db_session):
+    report_data = _first_encounter_report_data(db_session)
+    # 이 필드들이 아예 없는 "기존 저장 데이터" 모양을 그대로 흉내낸다.
+    legacy_stored_dict = ReportContentSnapshot(
+        emr_snapshot=EmrSnapshot.model_validate(report_data), narrative=None,
+        handoff_note=None, patient_guidance=None,
+    ).model_dump(mode="json")
+    del legacy_stored_dict["narrative_source"]
+    del legacy_stored_dict["narrative_edited_by_clinician"]
+
+    reparsed = ReportContentSnapshot.model_validate(legacy_stored_dict)
+
+    assert reparsed.narrative_source is None
+    assert reparsed.narrative_edited_by_clinician is False
+
+
+def test_narrative_source_and_edited_round_trip_through_json(db_session):
+    report_data = _first_encounter_report_data(db_session)
+    snapshot = ReportContentSnapshot(
+        emr_snapshot=EmrSnapshot.model_validate(report_data), narrative="x",
+        handoff_note=None, patient_guidance=None,
+        narrative_source="llm", narrative_edited_by_clinician=True,
+    )
+
+    reparsed = ReportContentSnapshot.model_validate(snapshot.model_dump(mode="json"))
+
+    assert reparsed.narrative_source == "llm"
+    assert reparsed.narrative_edited_by_clinician is True
+
+
 # 17. 비밀번호와 비밀정보가 content에 없음
 def test_content_never_contains_secrets(db_session):
     report_data = _first_encounter_report_data(db_session)

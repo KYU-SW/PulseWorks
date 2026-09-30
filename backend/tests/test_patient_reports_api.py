@@ -286,6 +286,8 @@ def test_detail_never_exposes_internal_fields_anywhere(db_session, override_get_
         "source_record_ids", "handoff_note", "rule_id", "source_type",
         "created_by_user_id", "last_modified_by_user_id", "reviewed_by_user_id",
         "safety_alerts", "clinical_notes", "preview_text", "prescribed_by_user_id",
+        # Task D1: narrative 출처 메타데이터는 의사 화면 전용이다.
+        "narrative_source", "narrative_edited_by_clinician", "provider", "vendor", "model",
     ]:
         assert f'"{forbidden_key}"' not in raw_text
 

@@ -343,6 +343,170 @@ def test_patch_unassigned_and_nonexistent_report_return_identical_404(db_session
     assert unassigned.json() == nonexistent.json()
 
 
+# ============================== Task D1: PATCH narrative_source 추적 ===========
+
+
+def test_first_clinician_authored_narrative_gets_clinician_source(db_session, override_get_db):
+    # 규칙 C: 기존 narrative가 비어 있는 상태에서 의료진이 처음 입력.
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    created = _create_report(token, patient.id, encounter_id)
+
+    response = _patch(created["id"], token, {"narrative": "의사가 처음부터 직접 작성한 설명"})
+
+    body = response.json()
+    assert body["content"]["narrative_source"] == "clinician"
+    assert body["content"]["narrative_edited_by_clinician"] is False
+
+
+def test_editing_a_mock_generated_narrative_keeps_source_and_sets_edited(
+    db_session, override_get_db
+):
+    # 규칙 D: 기존 narrative_source="mock"에서 narrative가 실제로 바뀜.
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    created = _report_with_narrative(db_session, token, patient.id, encounter_id)
+    assert created["content"]["narrative_source"] == "mock"
+
+    response = _patch(created["id"], token, {"narrative": "Mock 초안을 의사가 고친 내용"})
+
+    body = response.json()
+    assert body["content"]["narrative_source"] == "mock"
+    assert body["content"]["narrative_edited_by_clinician"] is True
+
+
+def test_editing_an_llm_generated_narrative_keeps_source_and_sets_edited(
+    db_session, override_get_db, monkeypatch
+):
+    # 규칙 D: 기존 narrative_source="llm"에서 narrative가 실제로 바뀜.
+    from app.services.narrative_providers.base import MentionedMeasurement, NarrativeProviderResult
+
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    created = _create_report(token, patient.id, encounter_id)
+
+    class _FakeProvider:
+        def generate(self, snapshot):
+            return NarrativeProviderResult(
+                narrative="HbA1c 결과가 확인됩니다.",
+                cited_record_ids=[],
+                mentioned_measurements=[MentionedMeasurement("HbA1c", 7.2, "%")],
+                provider="LLM",
+                model="test-model",
+                version="1",
+            )
+
+    monkeypatch.setattr(
+        "app.routers.clinical_reports.get_narrative_provider", lambda: _FakeProvider()
+    )
+    generated = _generate_narrative(created["id"], token)
+    assert generated["content"]["narrative_source"] == "llm"
+
+    response = _patch(created["id"], token, {"narrative": "AI 초안을 의사가 고친 내용"})
+
+    body = response.json()
+    assert body["content"]["narrative_source"] == "llm"
+    assert body["content"]["narrative_edited_by_clinician"] is True
+
+
+def test_editing_a_legacy_narrative_with_unknown_source_keeps_it_unknown(
+    db_session, override_get_db
+):
+    # 규칙 E: 기존 narrative_source가 None(출처 불명)이고 narrative가 이미
+    # 있던 상태(Task D1 이전에 생성된 것처럼)에서 의료진이 내용을 바꿈 -
+    # "고쳤다"는 사실만으로 clinician으로 바꾸지 않는다(최초 출처를
+    # 여전히 모르기 때문).
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    created = _report_with_narrative(db_session, token, patient.id, encounter_id)
+
+    # Task D1 이전 데이터 모양을 직접 흉내낸다 - narrative는 있지만
+    # narrative_source/edited 키 자체가 없는 상태.
+    report = db_session.query(ClinicalReport).filter_by(id=created["id"]).first()
+    legacy_content = dict(report.content)
+    legacy_content.pop("narrative_source", None)
+    legacy_content.pop("narrative_edited_by_clinician", None)
+    report.content = legacy_content
+    db_session.commit()
+
+    response = _patch(created["id"], token, {"narrative": "출처를 모르는 기존 내용을 의사가 수정"})
+
+    body = response.json()
+    assert body["content"]["narrative_source"] is None
+    assert body["content"]["narrative_edited_by_clinician"] is True
+
+
+def test_patching_only_handoff_note_preserves_narrative_metadata(db_session, override_get_db):
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    created = _report_with_narrative(db_session, token, patient.id, encounter_id)
+    assert created["content"]["narrative_source"] == "mock"
+
+    response = _patch(created["id"], token, {"handoff_note": "인수인계 메모만 추가"})
+
+    body = response.json()
+    assert body["content"]["narrative_source"] == "mock"
+    assert body["content"]["narrative_edited_by_clinician"] is False
+
+
+def test_patching_only_patient_guidance_preserves_narrative_metadata(db_session, override_get_db):
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    created = _report_with_narrative(db_session, token, patient.id, encounter_id)
+
+    response = _patch(created["id"], token, {"patient_guidance": "환자 안내문만 추가"})
+
+    body = response.json()
+    assert body["content"]["narrative_source"] == "mock"
+    assert body["content"]["narrative_edited_by_clinician"] is False
+
+
+def test_resaving_the_identical_narrative_does_not_set_edited(db_session, override_get_db):
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    created = _report_with_narrative(db_session, token, patient.id, encounter_id)
+    same_narrative = created["content"]["narrative"]
+
+    response = _patch(created["id"], token, {"narrative": same_narrative})
+
+    body = response.json()
+    assert body["content"]["narrative_source"] == "mock"
+    assert body["content"]["narrative_edited_by_clinician"] is False
+
+
+def test_editing_after_rejected_returns_to_draft_still_tracks_edited(
+    db_session, override_get_db
+):
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    created = _report_with_narrative(db_session, token, patient.id, encounter_id)
+    _reject(created["id"], token)
+
+    response = _patch(created["id"], token, {"narrative": "반려 후 의사가 고친 내용"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "DRAFT"
+    assert body["content"]["narrative_source"] == "mock"
+    assert body["content"]["narrative_edited_by_clinician"] is True
+
+
 # ============================== approve ====================================
 
 

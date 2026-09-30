@@ -32,11 +32,60 @@ type ConfirmStep = "idle" | "confirming";
 const GENERIC_SAVE_ERROR = "보고서를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 const GENERIC_APPROVE_ERROR = "보고서를 승인하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 const GENERIC_REJECT_ERROR = "보고서를 반려하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+// generateReportNarrative()가 ApiError가 아닌 오류(예: 네트워크 자체
+// 실패)로 거부될 때만 쓰는 최후 대체 문구 — 백엔드가 이미 안전한
+// detail 메시지를 주는 일반적인 경우(503/502)에는 그 메시지를 그대로
+// 쓴다(아래 handleGenerateNarrative).
+const GENERIC_NARRATIVE_ERROR = "설명문을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 
 // 유효한 report_id 형식(양의 정수)이 아니면 API를 호출하지 않고 바로
 // 404와 동일한 일반화된 안내를 보여준다.
 function isValidReportId(reportId: string | undefined): boolean {
   return !!reportId && /^\d+$/.test(reportId);
+}
+
+// Task D1: narrative_source/narrative_edited_by_clinician으로 정확한
+// 출처 문구를 고른다. 예상하지 못한 값(및 null — Task D1 이전에 만들어진
+// 기존 보고서)은 전부 "출처 불명" 문구로 안전하게 처리한다 — 실제
+// vendor/모델 이름이나 과장된 품질 보증 표현은 어디에도 넣지 않는다.
+function getNarrativeSourceNotice(
+  source: string | null,
+  edited: boolean
+): { line1: string; line2: string } {
+  if (source === "mock" && !edited) {
+    return {
+      line1: "결정적 Mock 기반 검토 전 초안",
+      line2: "의료진 검토 전에는 환자에게 공개되지 않습니다.",
+    };
+  }
+  if (source === "mock" && edited) {
+    return {
+      line1: "Mock 초안을 바탕으로 의료진이 수정한 내용",
+      line2: "의료진 승인 전에는 환자에게 공개되지 않습니다.",
+    };
+  }
+  if (source === "llm" && !edited) {
+    return {
+      line1: "AI로 생성된 검토 전 초안",
+      line2: "의료진 검토 전에는 환자에게 공개되지 않습니다.",
+    };
+  }
+  if (source === "llm" && edited) {
+    return {
+      line1: "AI 초안을 바탕으로 의료진이 수정한 내용",
+      line2: "의료진 승인 전에는 환자에게 공개되지 않습니다.",
+    };
+  }
+  if (source === "clinician") {
+    return {
+      line1: "의료진이 직접 작성한 검토 전 내용",
+      line2: "승인 전에는 환자에게 공개되지 않습니다.",
+    };
+  }
+  return {
+    line1: "의료진 검토 전 초안",
+    line2: "승인 전에는 환자에게 공개되지 않습니다.",
+  };
 }
 
 // 공백만 있는 입력은 null로 보낸다 — 백엔드도 동일하게 정규화하지만,
@@ -63,6 +112,7 @@ export default function ClinicalReportPreviewPage() {
 
   const [isGeneratingNarrative, setIsGeneratingNarrative] = useState(false);
   const [narrativeError, setNarrativeError] = useState<string | null>(null);
+  const [narrativeSucceeded, setNarrativeSucceeded] = useState(false);
 
   const [editableNarrative, setEditableNarrative] = useState("");
   const [editableHandoffNote, setEditableHandoffNote] = useState("");
@@ -117,15 +167,29 @@ export default function ClinicalReportPreviewPage() {
   async function handleGenerateNarrative() {
     if (!report || isGeneratingNarrative) return; // 중복 요청 방지
     setNarrativeError(null);
+    setNarrativeSucceeded(false); // 새 생성 시작 전 이전 성공 안내를 지운다.
     setIsGeneratingNarrative(true);
     try {
       const updated = await generateReportNarrative(report.id);
       // 반환된 ClinicalReport로 화면 상태만 갱신한다 — 전체 페이지 새로고침이나
       // 추가 EMR API 호출 없음.
       setReport(updated);
+      setNarrativeSucceeded(true);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return; // 전역 처리
-      setNarrativeError("설명문을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      if (err instanceof ApiError && err.status === 502) {
+        // 검증 실패 — 백엔드의 안전한 문구에 "내용은 바뀌지 않았다"는
+        // 안심 문장만 프론트에서 덧붙인다(백엔드는 그 문장을 주지 않음).
+        setNarrativeError(`${err.message} 보고서 내용은 변경되지 않았습니다.`);
+      } else if (err instanceof ApiError && err.status === 503) {
+        // 서비스 사용 불가 — 백엔드가 이미 안전하게 일반화한 detail
+        // 메시지를 그대로 쓴다(승인 409 처리와 같은 패턴).
+        setNarrativeError(err.message);
+      } else {
+        // 502/503 외의 상태(500, 예상치 못한 오류 등)는 백엔드 detail을
+        // 신뢰하지 않는다 — 그 두 상태만 "안전하다고 약속된" 문구다.
+        setNarrativeError(GENERIC_NARRATIVE_ERROR);
+      }
     } finally {
       setIsGeneratingNarrative(false);
     }
@@ -135,6 +199,10 @@ export default function ClinicalReportPreviewPage() {
     if (!report || isSaving) return; // 중복 요청 방지
     setSaveError(null);
     setSaveSucceeded(false); // 새 저장 시작 전 이전 성공 안내를 지운다.
+    // 생성 성공 안내와 저장 성공 안내가 동시에 뜨지 않도록, 저장을
+    // 시작하면 이전 생성 성공 안내도 함께 지운다 — 가장 최근 동작의
+    // 결과만 보여준다.
+    setNarrativeSucceeded(false);
     setIsSaving(true);
     try {
       const updated = await patchClinicalReport(report.id, {
@@ -152,10 +220,11 @@ export default function ClinicalReportPreviewPage() {
     }
   }
 
-  // 세 필드 중 하나라도 다시 수정하면 이전 저장 성공 안내를 지운다.
+  // 세 필드 중 하나라도 다시 수정하면 이전 저장·생성 성공 안내를 지운다.
   function handleEditableFieldChange(setField: (value: string) => void, value: string) {
     setField(value);
     setSaveSucceeded(false);
+    setNarrativeSucceeded(false);
   }
 
   async function handleApproveConfirmed() {
@@ -167,6 +236,7 @@ export default function ClinicalReportPreviewPage() {
       setReport(updated);
       setApproveStep("idle");
       setSaveSucceeded(false); // APPROVED가 되면 저장 편집 영역 자체가 사라지므로 상태도 정리한다.
+      setNarrativeSucceeded(false);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return;
       // 409는 "설명문을 먼저 작성/생성하세요" 같은 사용자가 바로 행동할 수
@@ -278,7 +348,7 @@ export default function ClinicalReportPreviewPage() {
                 disabled={isGeneratingNarrative}
                 loading={isGeneratingNarrative}
               >
-                {isGeneratingNarrative ? "설명문을 생성하는 중..." : "Mock 설명문 생성"}
+                {isGeneratingNarrative ? "설명문 초안 생성 중..." : "설명문 초안 생성"}
               </Button>
               {narrativeError && (
                 <AlertBox variant="error" role="alert">
@@ -288,12 +358,32 @@ export default function ClinicalReportPreviewPage() {
             </Card>
           )}
 
+          {/* canGenerateNarrative와 별개로 둔다 — 생성이 성공하면 report의
+              narrative가 채워져 canGenerateNarrative가 바로 false가
+              되어 위 Card 전체가 사라지므로, 성공 안내를 그 Card 안에
+              두면 뜨자마자 같은 렌더링에서 사라져 버린다. */}
+          {narrativeSucceeded && report.status === "DRAFT" && (
+            <div className="report-save-feedback" aria-live="polite">
+              <p className="report-save-feedback__success" role="status">
+                설명문 초안이 생성되었습니다. 내용을 검토한 뒤 저장하거나 승인하세요.
+              </p>
+            </div>
+          )}
+
           {isEditable && (
             <SectionCard title="서술형 내용 편집">
-              <p>
-                이 내용은 정해진 규칙으로 만든 결정적 Mock 초안이거나 의료진이 직접 작성한
-                내용이며, 의료진의 검토가 필요합니다. 환자에게는 아직 공개되지 않습니다.
-              </p>
+              {(() => {
+                const notice = getNarrativeSourceNotice(
+                  report.content.narrative_source,
+                  report.content.narrative_edited_by_clinician
+                );
+                return (
+                  <>
+                    <p>{notice.line1}</p>
+                    <p>{notice.line2}</p>
+                  </>
+                );
+              })()}
 
               <FormField label="설명문" htmlFor="narrative-textarea">
                 <textarea

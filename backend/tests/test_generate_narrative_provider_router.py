@@ -253,6 +253,30 @@ def test_a_valid_llm_result_is_saved_with_the_llm_audit_reason(
     assert "LLM" not in audit_log.reason
 
 
+# ============================== Task D1: narrative_source ======================
+
+
+def test_a_valid_llm_result_sets_narrative_source_llm_and_unedited(
+    db_session, override_get_db, monkeypatch
+):
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    created = _create_report(token, patient.id, encounter_id)
+
+    fake_provider = _FakeProvider(result=VALID_LLM_RESULT)
+    monkeypatch.setattr(
+        "app.routers.clinical_reports.get_narrative_provider", lambda: fake_provider
+    )
+
+    response = _generate(created["id"], token)
+
+    body = response.json()
+    assert body["content"]["narrative_source"] == "llm"
+    assert body["content"]["narrative_edited_by_clinician"] is False
+
+
 # ============================== 기존 narrative가 있으면 provider 미호출 =========
 
 

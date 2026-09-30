@@ -74,6 +74,8 @@ function contentFor(overrides: Partial<ReportContentSnapshot["emr_snapshot"]> = 
     narrative: null,
     handoff_note: null,
     patient_guidance: null,
+    narrative_source: null,
+    narrative_edited_by_clinician: false,
   };
 }
 

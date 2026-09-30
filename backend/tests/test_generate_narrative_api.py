@@ -332,3 +332,34 @@ def test_ambient_llm_environment_variables_have_no_effect_on_this_test(
         .first()
     )
     assert audit_log.reason == "deterministic_mock_narrative"
+
+
+# ============================== Task D1: narrative_source ======================
+
+
+def test_mock_generation_sets_narrative_source_mock_and_unedited(db_session, override_get_db):
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    report = _create_report(db_session, token, patient.id, encounter_id)
+
+    response = _generate(report["id"], token)
+
+    body = response.json()
+    assert body["content"]["narrative_source"] == "mock"
+    assert body["content"]["narrative_edited_by_clinician"] is False
+
+
+def test_idempotent_recall_does_not_change_narrative_source(db_session, override_get_db):
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    report = _create_report(db_session, token, patient.id, encounter_id)
+    first = _generate(report["id"], token).json()
+
+    second = _generate(report["id"], token).json()
+
+    assert second["content"]["narrative_source"] == first["content"]["narrative_source"] == "mock"
+    assert second["content"]["narrative_edited_by_clinician"] is False

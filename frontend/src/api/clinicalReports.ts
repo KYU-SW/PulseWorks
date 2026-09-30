@@ -116,6 +116,11 @@ export type ReportContentSnapshot = {
   narrative: string | null;
   handoff_note: string | null;
   patient_guidance: string | null;
+  // Task D1: narrative 출처 메타데이터 — "mock" | "llm" | "clinician" | null
+  // (null은 Task D1 이전에 만들어진 기존 보고서처럼 출처를 정확히 알 수
+  // 없는 경우). 환자용 API에는 이 두 필드가 없다.
+  narrative_source: string | null;
+  narrative_edited_by_clinician: boolean;
 };
 
 export type ClinicalReportOut = {
