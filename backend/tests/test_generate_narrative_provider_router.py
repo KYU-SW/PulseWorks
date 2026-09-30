@@ -7,6 +7,7 @@ tests/test_generate_narrative_api.py(Task 16)는 건드리지 않는다 - mock
 
 from datetime import datetime, timezone
 
+import pytest
 from app.core.config import Settings
 from app.main import app
 from app.models import AiSummary, AuditLog, ClinicalReport, Encounter, Patient
@@ -21,6 +22,22 @@ from scripts.seed_synthetic_data import seed
 client = TestClient(app)
 
 ENDOCRINE_DOCTOR_EMAIL = "endocrine.doctor@example.test"
+
+
+# Task C2: 이 파일의 테스트가 실제 backend/.env의 NARRATIVE_PROVIDER 값과
+# 무관하게 항상 안전한 mock 기본값에서 시작하도록 한다 - 로컬 .env가
+# 우연히 llm으로 설정돼 있어도(실제로 이런 일이 있었다) 이 기본값이
+# 먼저 적용된다. 개별 테스트가 스스로 factory.get_settings나
+# get_narrative_provider를 monkeypatch하면(이 파일의 LLM 경로/설정
+# 오류 테스트 대부분이 이미 그렇게 한다) 그 값이 이 기본값을 덮어쓴다 -
+# monkeypatch는 같은 테스트 안에서 나중에 설정한 값을 쓰고, teardown
+# 시점에는 원래 값으로 복구하므로 서로 충돌하지 않는다.
+@pytest.fixture(autouse=True)
+def _default_to_mock_settings(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.narrative_providers.factory.get_settings",
+        lambda: Settings(narrative_provider="mock"),
+    )
 
 
 def _login(email: str) -> str:
@@ -275,6 +292,39 @@ def test_mock_default_still_succeeds_exactly_like_task_16(db_session, override_g
     body = response.json()
     assert body["content"]["narrative"] is not None
 
+    audit_log = (
+        db_session.query(AuditLog)
+        .filter_by(action="GENERATE_REPORT_NARRATIVE", resource_id=str(created["id"]))
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert audit_log.reason == "deterministic_mock_narrative"
+
+
+# ============================== Task C2: ambient 환경변수 무관 ==================
+
+
+def test_ambient_llm_environment_variables_have_no_effect_on_this_test(
+    db_session, override_get_db, monkeypatch
+):
+    # 실제 backend/.env 파일은 건드리지 않는다 - OS 환경변수만으로 llm/
+    # ollama 환경을 흉내 낸다. _default_to_mock_settings 오토유즈
+    # 픽스처가 factory.get_settings 자체를 대체하므로, 이 환경변수는
+    # 전혀 읽히지 않고 실제 Ollama/네트워크 호출도 발생하지 않아야 한다.
+    monkeypatch.setenv("NARRATIVE_PROVIDER", "llm")
+    monkeypatch.setenv("LLM_VENDOR", "ollama")
+    monkeypatch.setenv("LLM_MODEL", "qwen3:8b")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434")
+
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    created = _create_report(token, patient.id, encounter_id)
+
+    response = _generate(created["id"], token)
+
+    assert response.status_code == 200
     audit_log = (
         db_session.query(AuditLog)
         .filter_by(action="GENERATE_REPORT_NARRATIVE", resource_id=str(created["id"]))
