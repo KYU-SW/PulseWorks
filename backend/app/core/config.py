@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_timeout_seconds: float = 30.0
     llm_max_output_tokens: int = 1000
+    # Task B: 어떤 벤더를 쓸지(예: "ollama")와 그 벤더의 API 주소.
+    # "이 값이 있으면 어떤 벤더인지" 같은 교차 검증은 여기서 하지 않고
+    # factory.py가 한다 - 위 llm_api_key와 같은 이유(narrative_provider와
+    # 무관한 모듈도 앱 시작 시 Settings()를 그대로 쓰기 때문).
+    llm_vendor: str = ""
+    llm_base_url: str = ""
 
     @field_validator("narrative_provider")
     @classmethod

@@ -1,5 +1,7 @@
+import json
 import re
 
+import httpx
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
@@ -14,6 +16,7 @@ from app.services.narrative_providers.base import (
 from app.services.narrative_providers.factory import get_narrative_provider
 from app.services.narrative_providers.llm_client import LlmHttpError
 from app.services.narrative_providers.mock_provider import DeterministicMockProvider
+from app.services.narrative_providers.ollama_client import OllamaHttpClient
 from app.services.narrative_providers.prompt import build_narrative_prompt
 from app.services.narrative_providers.real_llm_provider import RealLLMProvider
 
@@ -323,6 +326,43 @@ class TestEvidenceTagResolution:
         assert result.cited_record_ids == ["lab_result:1", "encounter:1"]
 
 
+# ============================== RealLLMProvider + OllamaHttpClient 통합 =========
+
+
+class TestRealLLMProviderWithOllamaClient:
+    """MockTransport로 실제 네트워크 없이 OllamaHttpClient를
+    RealLLMProvider에 주입해, Task A의 evidence_tags 계약이 Task B의
+    벤더 Adapter를 거쳐도 그대로 지켜지는지 확인한다."""
+
+    def test_end_to_end_resolves_evidence_tags_through_the_ollama_client(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            content = json.dumps(
+                {"narrative": "HbA1c가 확인됩니다.", "evidence_tags": ["L1"], "mentioned_measurements": []}
+            )
+            return httpx.Response(200, json={"message": {"role": "assistant", "content": content}})
+
+        client = OllamaHttpClient(base_url="http://ollama.invalid:11434", transport=httpx.MockTransport(handler))
+        provider = RealLLMProvider(client=client, model="qwen3:8b", max_output_tokens=500, timeout_seconds=10)
+
+        result = provider.generate(_snapshot())
+
+        assert result.narrative == "HbA1c가 확인됩니다."
+        assert result.cited_record_ids == ["lab_result:1"]
+        assert result.provider == "LLM"
+        assert result.model == "qwen3:8b"
+
+    def test_llm_request_failure_through_ollama_client_never_falls_back_to_mock(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(500, json={"error": "boom"})
+
+        client = OllamaHttpClient(base_url="http://ollama.invalid:11434", transport=httpx.MockTransport(handler))
+        provider = RealLLMProvider(client=client, model="qwen3:8b", max_output_tokens=500, timeout_seconds=10)
+
+        with pytest.raises(NarrativeProviderError) as exc_info:
+            provider.generate(_snapshot())
+        assert exc_info.value.code == "LLM_REQUEST_FAILED"
+
+
 # ============================== Factory ======================================
 
 
@@ -351,20 +391,48 @@ class TestGetNarrativeProvider:
         with pytest.raises(PydanticValidationError):
             Settings(llm_max_output_tokens=0)
 
-    def test_llm_without_api_key_is_rejected(self):
-        settings = Settings(narrative_provider="llm", llm_api_key=None, llm_model="gpt-4")
+    # --- Task B: 벤더 분기 -------------------------------------------------
+
+    def test_llm_without_a_vendor_is_rejected_and_does_not_guess_ollama(self):
+        settings = Settings(narrative_provider="llm", llm_model="qwen3:8b")
         with pytest.raises(NarrativeProviderError) as exc_info:
             get_narrative_provider(settings)
-        assert exc_info.value.code == "LLM_API_KEY_MISSING"
+        assert exc_info.value.code == "LLM_VENDOR_MISSING"
 
-    def test_llm_without_model_is_rejected(self):
-        settings = Settings(narrative_provider="llm", llm_api_key="sk-fake", llm_model="")
+    def test_llm_with_an_unsupported_vendor_is_rejected(self):
+        settings = Settings(
+            narrative_provider="llm", llm_vendor="openai", llm_api_key="sk-fake", llm_model="gpt-4"
+        )
+        with pytest.raises(NarrativeProviderError) as exc_info:
+            get_narrative_provider(settings)
+        assert exc_info.value.code == "LLM_VENDOR_UNSUPPORTED"
+
+    def test_ollama_without_base_url_is_rejected(self):
+        settings = Settings(narrative_provider="llm", llm_vendor="ollama", llm_model="qwen3:8b")
+        with pytest.raises(NarrativeProviderError) as exc_info:
+            get_narrative_provider(settings)
+        assert exc_info.value.code == "LLM_BASE_URL_MISSING"
+
+    def test_ollama_without_model_is_rejected(self):
+        settings = Settings(
+            narrative_provider="llm",
+            llm_vendor="ollama",
+            llm_base_url="http://localhost:11434",
+            llm_model="",
+        )
         with pytest.raises(NarrativeProviderError) as exc_info:
             get_narrative_provider(settings)
         assert exc_info.value.code == "LLM_MODEL_MISSING"
 
-    def test_llm_with_key_and_model_still_fails_because_no_adapter_exists(self):
-        settings = Settings(narrative_provider="llm", llm_api_key="sk-fake", llm_model="gpt-4")
-        with pytest.raises(NarrativeProviderError) as exc_info:
-            get_narrative_provider(settings)
-        assert exc_info.value.code == "LLM_NOT_CONFIGURED"
+    def test_ollama_initializes_without_an_api_key(self):
+        # 로컬 Ollama는 API 키가 없어도 정상적으로 조립되어야 한다 -
+        # 이것이 이번 Task B 벤더 분기의 핵심 동작이다.
+        settings = Settings(
+            narrative_provider="llm",
+            llm_vendor="ollama",
+            llm_base_url="http://localhost:11434",
+            llm_model="qwen3:8b",
+            llm_api_key=None,
+        )
+        provider = get_narrative_provider(settings)
+        assert isinstance(provider, RealLLMProvider)

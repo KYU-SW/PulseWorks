@@ -19,6 +19,13 @@ services:
       # to, so that host-side pytest runs against the port published on
       # 5432 can reach it). JWT_SECRET etc. still come from .env via env_file.
       DATABASE_URL: postgresql+psycopg2://emr:emr@db:5432/emr
+      # Same pattern for LLM_BASE_URL (Task B, Ollama vendor only): Ollama
+      # runs natively on the Windows host, not as a compose service, so
+      # "localhost" from inside this container would mean the container
+      # itself. host.docker.internal is Docker Desktop's name for the
+      # Windows host. .env keeps the host-side value (http://localhost:11434)
+      # for when backend is run directly with uvicorn/pytest.
+      LLM_BASE_URL: http://host.docker.internal:11434
     depends_on:
       - db
     ports:
