@@ -3,12 +3,28 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import Settings
 from app.main import app
 from app.models import AuditLog, ClinicalReport, ClinicalReportStatus, Encounter, Patient, User
 from app.routers import clinical_reports as clinical_reports_router
 from scripts.seed_synthetic_data import seed
 
 client = TestClient(app)
+
+
+# Task C2/D1 후속: 이 파일도 generate-narrative를 호출하는 테스트가 있어
+# (_report_with_narrative) 실제 backend/.env의 NARRATIVE_PROVIDER 값과
+# 무관하게 항상 안전한 mock 기본값에서 시작하도록 한다 - Task C2에서
+# test_generate_narrative_api.py/test_generate_narrative_provider_router.py
+# 에 적용한 것과 정확히 같은 패턴(같은 monkeypatch 대상)이다. 개별
+# 테스트가 스스로 factory.get_settings나 get_narrative_provider를
+# monkeypatch하면 그 값이 이 기본값을 덮어쓴다.
+@pytest.fixture(autouse=True)
+def _default_to_mock_settings(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.narrative_providers.factory.get_settings",
+        lambda: Settings(narrative_provider="mock"),
+    )
 
 
 def _same_instant(a: str, b: str) -> bool:
@@ -832,3 +848,40 @@ def test_no_endpoint_ever_leaks_secrets(db_session, override_get_db):
     for log in logs:
         for field in (log.resource_id, log.reason, log.action, log.resource_type):
             assert token not in field
+
+
+# ============================== Task C2: ambient 환경변수 무관 ==================
+
+
+def test_ambient_llm_environment_variables_have_no_effect_on_this_test(
+    db_session, override_get_db, monkeypatch
+):
+    # 실제 backend/.env 파일은 건드리지 않는다 - OS 환경변수만으로 llm/
+    # ollama 환경을 흉내 낸다. _default_to_mock_settings 오토유즈
+    # 픽스처가 factory.get_settings 자체를 대체하므로, 이 환경변수는
+    # 전혀 읽히지 않고 실제 OllamaHttpClient/네트워크 호출도 발생하지
+    # 않아야 한다.
+    monkeypatch.setenv("NARRATIVE_PROVIDER", "llm")
+    monkeypatch.setenv("LLM_VENDOR", "ollama")
+    monkeypatch.setenv("LLM_MODEL", "qwen3:8b")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434")
+
+    seed(db_session)
+    patient = _endo_patient(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    encounter_id = _first_encounter_id(db_session, patient.id)
+    created = _create_report(token, patient.id, encounter_id)
+
+    response = client.post(
+        f"/reports/{created['id']}/generate-narrative", headers=_auth_header(token)
+    )
+
+    assert response.status_code == 200
+    audit_log = (
+        db_session.query(AuditLog)
+        .filter_by(action="GENERATE_REPORT_NARRATIVE", resource_id=str(created["id"]))
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert audit_log.reason == "deterministic_mock_narrative"
+    assert response.json()["content"]["narrative_source"] == "mock"
