@@ -14,10 +14,21 @@ LLM은 자유 서술형이라 이 검사가 실제로 의미를 가진다.
 같은 뜻의 새로운 표현(예: "약을 그만 드셔야 합니다")은 이 목록으로
 잡아내지 못할 수 있다. 최종 안전장치는 여전히 담당 의사의 검토·승인
 절차(Task 17)이며, 이 검증은 그 절차를 대체하지 않는다.
+
+Task C1(2026-09-30 실제 Ollama 수동 검증에서 narrative 본문에 "(E1)",
+"(D1)" 노출 발견) 추가: LLM 결과에 한해 evidence tag가 narrative 본문에
+노출됐는지도 검사한다 - "[E1]"/"(D1)"/"{L1}"처럼 구분자로 감싼 형태와
+"근거 E1"/"출처 D1"처럼 인용 단서어와 함께 나온 형태만 차단한다.
+구분자·단서어 없이 홀로 등장하는 "L1"(정형외과에서 제1요추를 가리킬
+수 있는 실제 의학 표현) 같은 토큰은 오탐을 피하기 위해 의도적으로
+차단하지 않는다 - 이 요청에서 실제로 유효한 태그 집합을 알아야 할
+필요가 없어 narrative_validation.py가 prompt.py에 의존하지 않는다.
+Mock은 태그 개념을 전혀 모르므로(별도 검증 함수) 이 검사와 무관하다.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
@@ -40,6 +51,19 @@ BANNED_NARRATIVE_PHRASES: tuple[str, ...] = (
     "예후는",
     "예상됩니다",
 )
+
+# 구분자로 감싼 형태([E1], (D1), {L1}, [ P1 ], ( A1 ) - 내부 공백 허용)와
+# 인용 단서어 + 태그 형태(근거 E1, 태그 D1, 출처 L1, 참고 P1, Evidence A1)
+# 만 차단한다. "L1 척추"/"제1요추 L1"/"E1 반응"처럼 구분자·단서어 없이
+# 홀로 등장하는 토큰은 정형외과의 실제 척추 레벨 표기(L1~L5 등)와
+# 구분할 수 없어 의도적으로 차단 대상에서 제외한다.
+_EVIDENCE_TAG_LEAK_PATTERN = re.compile(
+    r"[\[({]\s*[EDLPA]\d+\s*[\])}]|(?:근거|태그|출처|참고|[Ee]vidence)\s*[EDLPA]\d+"
+)
+
+
+def _contains_evidence_tag_leak(narrative: str) -> bool:
+    return bool(_EVIDENCE_TAG_LEAK_PATTERN.search(narrative))
 
 
 @dataclass(frozen=True)
@@ -118,4 +142,6 @@ def _validate_llm_result(
         return NarrativeValidationResult(False, "measurement_not_in_snapshot")
     if _contains_banned_phrase(result.narrative):
         return NarrativeValidationResult(False, "banned_phrase_detected")
+    if _contains_evidence_tag_leak(result.narrative):
+        return NarrativeValidationResult(False, "evidence_tag_leaked_into_narrative")
     return NarrativeValidationResult(True, None)

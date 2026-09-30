@@ -217,6 +217,53 @@ class TestBuildNarrativePrompt:
         second_line = next(line for line in second.text.splitlines() if line.startswith("[사용 가능한 태그]"))
         assert first_line == second_line
 
+    # --- Task C1: 본문 태그 금지 지시 + 진료과/진료형태 한글 정규화 ------------
+
+    def test_prompt_tells_the_model_to_never_write_tags_in_the_narrative_body(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+
+        assert "narrative 본문에는" in prompt.text
+        assert "[ ], ( ), { }" in prompt.text
+
+    def test_prompt_tells_the_model_evidence_tags_go_only_in_the_evidence_tags_field(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+
+        assert "evidence_tags는 JSON의 evidence_tags 필드에만" in prompt.text
+
+    def test_the_tag_prohibition_rule_appears_only_once(self):
+        # "같은 규칙을 여러 곳에 중복하지 마라" - [사용 가능한 태그] 근처
+        # 한 곳에만 있어야 한다.
+        prompt = build_narrative_prompt(_full_snapshot())
+        assert prompt.text.count("narrative 본문에는") == 1
+
+    def test_allowed_tags_block_is_still_present_alongside_the_new_rule(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+        assert "[사용 가능한 태그]" in prompt.text
+
+    def test_department_is_shown_as_the_standard_korean_label(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+
+        assert "내분비내과" in prompt.text
+        assert "ENDOCRINOLOGY" not in prompt.text
+
+    def test_encounter_type_is_shown_as_the_standard_korean_label(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+
+        assert "외래" in prompt.text
+        assert "OUTPATIENT" not in prompt.text
+
+    def test_unmapped_department_falls_back_to_the_raw_value_instead_of_guessing(self):
+        snapshot = _snapshot(
+            encounters=[
+                {
+                    "id": 1, "department": "SOME_FUTURE_DEPARTMENT", "encounter_type": "OUTPATIENT",
+                    "start_time": "2026-03-10T09:00:00Z", "end_time": None,
+                }
+            ]
+        )
+        prompt = build_narrative_prompt(snapshot)
+        assert "SOME_FUTURE_DEPARTMENT" in prompt.text
+
 
 # ============================== DeterministicMockProvider ===================
 

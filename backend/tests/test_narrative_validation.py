@@ -153,9 +153,110 @@ class TestLlmResultValidation:
         assert snapshot.model_dump(mode="json") == before
 
 
+class TestEvidenceTagLeakDetection:
+    # --- 차단해야 하는 표현 -------------------------------------------------
+
+    def test_rejects_square_bracket_tag(self):
+        result = _llm_result(narrative="검사 결과가 있습니다 [E1].")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_parenthesis_tag(self):
+        result = _llm_result(narrative="검사 결과가 있습니다 (D1).")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_curly_brace_tag(self):
+        result = _llm_result(narrative="검사 결과가 있습니다 {L1}.")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_square_bracket_tag_with_internal_spaces(self):
+        result = _llm_result(narrative="처방 기록이 있습니다 [ P1 ].")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_parenthesis_tag_with_internal_spaces(self):
+        result = _llm_result(narrative="알레르기 정보가 있습니다 ( A1 ).")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_geungeo_cue_word_with_tag(self):
+        result = _llm_result(narrative="이 설명은 근거 E1을 바탕으로 합니다.")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_tag_word_cue_with_tag(self):
+        result = _llm_result(narrative="이 설명은 태그 D1을 바탕으로 합니다.")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_source_cue_word_with_tag(self):
+        result = _llm_result(narrative="이 설명은 출처 L1을 바탕으로 합니다.")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_reference_cue_word_with_tag(self):
+        result = _llm_result(narrative="이 설명은 참고 P1을 바탕으로 합니다.")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_english_evidence_cue_word_with_tag_case_insensitive(self):
+        result = _llm_result(narrative="This is based on Evidence A1.")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    # --- 정상적으로 허용해야 하는 표현 ---------------------------------------
+
+    def test_allows_a_normal_narrative_with_no_tag_shaped_text(self):
+        result = _llm_result(narrative="내분비내과 외래 진료 기록을 정리한 설명문입니다.")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is True
+
+    def test_allows_l1_as_a_lumbar_spine_reference_without_delimiter(self):
+        # 정형외과에서 L1은 제1요추를 가리키는 실제 의학 표현이다 -
+        # 구분자나 인용 단서어 없이 홀로 등장하면 차단하지 않는다.
+        result = _llm_result(narrative="L1 척추 부위에 관한 기록이 있습니다.")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is True
+
+    def test_allows_l1_written_after_a_korean_vertebra_description(self):
+        result = _llm_result(narrative="제1요추 L1에 관한 기록이 있습니다.")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is True
+
+    def test_allows_e1_as_a_bare_word_without_delimiter_or_cue_word(self):
+        result = _llm_result(narrative="E1 반응이 확인되었습니다.")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is True
+
+    def test_allows_a_generic_alphanumeric_combination(self):
+        result = _llm_result(narrative="검사 항목 코드 A1B2와 관련된 기록입니다.")
+        validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is True
+
+
 class TestMockResultValidation:
     def test_the_mock_result_passes_with_its_own_looser_policy(self):
         validation = validate_narrative_provider_result(_mock_result(), _snapshot())
+        assert validation.ok is True
+
+    def test_mock_path_never_runs_the_evidence_tag_leak_check(self):
+        # Task C1: 이 검사는 _validate_llm_result에만 있다 - Mock 결과가
+        # 우연히 태그 모양 텍스트를 담고 있어도(정상적으로는 생기지
+        # 않지만) Mock 전용 느슨한 정책 그대로 통과해야 한다.
+        result = _mock_result(narrative="내분비내과 외래 방문 기록이 있습니다 [E1].")
+        validation = validate_narrative_provider_result(result, _snapshot())
         assert validation.ok is True
 
     def test_mock_result_with_no_evidence_still_passes(self):
