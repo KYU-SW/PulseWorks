@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
@@ -12,6 +14,7 @@ from app.services.narrative_providers.base import (
 from app.services.narrative_providers.factory import get_narrative_provider
 from app.services.narrative_providers.llm_client import LlmHttpError
 from app.services.narrative_providers.mock_provider import DeterministicMockProvider
+from app.services.narrative_providers.prompt import build_narrative_prompt
 from app.services.narrative_providers.real_llm_provider import RealLLMProvider
 
 
@@ -41,6 +44,104 @@ def _snapshot(**overrides) -> EmrSnapshot:
     }
     base.update(overrides)
     return EmrSnapshot.model_validate(base)
+
+
+def _full_snapshot() -> EmrSnapshot:
+    """encounter/diagnosis/lab_result/prescription/allergy를 모두 최소
+    1개씩 포함한 스냅샷 - 5개 태그 접두사(E/D/L/P/A)를 전부 검증하는 데
+    쓴다."""
+    return _snapshot(
+        diagnoses=[
+            {
+                "id": 7, "encounter_id": 1, "code": "E11.9", "description": "2형 당뇨병",
+                "diagnosed_at": "2026-03-10T09:00:00Z", "source_type": "INSTITUTION_GENERATED",
+            }
+        ],
+        prescriptions=[
+            {
+                "id": 9, "encounter_id": 1, "medication_name": "Metformin", "dosage": "500mg",
+                "prescribed_by_user_id": 1, "prescribed_at": "2026-03-10T09:00:00Z",
+                "source_type": "INSTITUTION_GENERATED",
+            }
+        ],
+        allergies=[
+            {
+                "id": 3, "substance": "Penicillin", "reaction": "두드러기", "severity": "MODERATE",
+                "recorded_at": "2026-01-01T09:00:00Z", "source_type": "INSTITUTION_GENERATED",
+            }
+        ],
+    )
+
+
+# ============================== build_narrative_prompt (익명 근거 태그) =========
+
+
+class TestBuildNarrativePrompt:
+    def test_never_includes_the_raw_source_record_ids(self):
+        snapshot = _full_snapshot()
+        prompt = build_narrative_prompt(snapshot)
+
+        for source_id in snapshot.source_record_ids:
+            assert source_id not in prompt.text
+
+    def test_never_includes_an_internal_type_colon_id_pattern(self):
+        snapshot = _full_snapshot()
+        prompt = build_narrative_prompt(snapshot)
+
+        assert not re.search(
+            r"\b(encounter|diagnosis|lab_result|prescription|allergy|safety_alert|clinical_note):\d+\b",
+            prompt.text,
+        )
+
+    def test_is_deterministic_for_the_same_snapshot(self):
+        snapshot = _full_snapshot()
+
+        first = build_narrative_prompt(snapshot)
+        second = build_narrative_prompt(snapshot)
+
+        assert first.text == second.text
+        assert first.tag_to_source_record_id == second.tag_to_source_record_id
+
+    def test_uses_the_correct_prefix_for_each_record_type(self):
+        snapshot = _full_snapshot()
+        prompt = build_narrative_prompt(snapshot)
+
+        assert prompt.tag_to_source_record_id["E1"] == "encounter:1"
+        assert prompt.tag_to_source_record_id["D1"] == "diagnosis:7"
+        assert prompt.tag_to_source_record_id["L1"] == "lab_result:1"
+        assert prompt.tag_to_source_record_id["P1"] == "prescription:9"
+        assert prompt.tag_to_source_record_id["A1"] == "allergy:3"
+
+    def test_tags_appear_inline_next_to_their_own_item_in_the_prompt_text(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+
+        assert "[E1]" in prompt.text
+        assert "[D1]" in prompt.text
+        assert "[L1]" in prompt.text
+        assert "[P1]" in prompt.text
+        assert "[A1]" in prompt.text
+
+    def test_never_generates_tags_for_safety_alerts_or_clinical_notes(self):
+        snapshot = _snapshot(
+            safety_alerts=[
+                {
+                    "id": 1, "encounter_id": 1, "prescription_id": None, "lab_result_id": 1,
+                    "rule_id": "LAB_REFERENCE_RANGE", "priority": "HIGH",
+                    "evidence": {}, "created_at": "2026-09-17T14:52:27Z",
+                }
+            ],
+            clinical_notes=[
+                {
+                    "id": 1, "encounter_id": 1, "author_user_id": 1, "preview_text": "미리보기",
+                    "created_at": "2026-03-10T09:00:00Z", "source_type": "INSTITUTION_GENERATED",
+                }
+            ],
+        )
+        prompt = build_narrative_prompt(snapshot)
+
+        assert not any(tag.startswith("S") or tag.startswith("C") for tag in prompt.tag_to_source_record_id)
+        assert "LAB_REFERENCE_RANGE" not in prompt.text
+        assert "미리보기" not in prompt.text
 
 
 # ============================== DeterministicMockProvider ===================
@@ -89,7 +190,7 @@ class _FakeLlmHttpClient:
 
 VALID_LLM_JSON = (
     '{"narrative": "HbA1c가 8.1%로 확인됩니다.", '
-    '"cited_record_ids": ["lab_result:1"], '
+    '"evidence_tags": ["L1"], '
     '"mentioned_measurements": [{"test_name": "HbA1c", "value": 8.1, "unit": "%"}]}'
 )
 
@@ -136,7 +237,7 @@ class TestRealLLMProvider:
 
     def test_rejects_a_response_with_an_extra_unexpected_field(self):
         client = _FakeLlmHttpClient(
-            response='{"narrative": "x", "cited_record_ids": [], "mentioned_measurements": [], '
+            response='{"narrative": "x", "evidence_tags": ["L1"], "mentioned_measurements": [], '
             '"provider": "SNEAKY_SELF_REPORTED_PROVIDER"}'
         )
         provider = RealLLMProvider(client=client, model="test-model", max_output_tokens=500, timeout_seconds=10)
@@ -164,6 +265,62 @@ class TestRealLLMProvider:
 
         result = provider.generate(_snapshot())
         assert result.model == "server-configured-model"
+
+
+# ============================== 익명 evidence_tags 역매핑 ========================
+
+
+class TestEvidenceTagResolution:
+    def test_resolves_a_valid_tag_to_the_real_source_record_id(self):
+        client = _FakeLlmHttpClient(
+            response='{"narrative": "x", "evidence_tags": ["L1"], "mentioned_measurements": []}'
+        )
+        provider = RealLLMProvider(client=client, model="test-model", max_output_tokens=500, timeout_seconds=10)
+
+        result = provider.generate(_snapshot())
+
+        assert result.cited_record_ids == ["lab_result:1"]
+
+    def test_rejects_a_tag_that_was_never_offered(self):
+        client = _FakeLlmHttpClient(
+            response='{"narrative": "x", "evidence_tags": ["Z9"], "mentioned_measurements": []}'
+        )
+        provider = RealLLMProvider(client=client, model="test-model", max_output_tokens=500, timeout_seconds=10)
+
+        with pytest.raises(NarrativeProviderError) as exc_info:
+            provider.generate(_snapshot())
+        assert exc_info.value.code == "LLM_EVIDENCE_TAG_UNKNOWN"
+
+    def test_rejects_an_empty_evidence_tags_list(self):
+        client = _FakeLlmHttpClient(
+            response='{"narrative": "x", "evidence_tags": [], "mentioned_measurements": []}'
+        )
+        provider = RealLLMProvider(client=client, model="test-model", max_output_tokens=500, timeout_seconds=10)
+
+        with pytest.raises(NarrativeProviderError) as exc_info:
+            provider.generate(_snapshot())
+        assert exc_info.value.code == "LLM_EVIDENCE_TAGS_EMPTY"
+
+    def test_a_single_invalid_tag_rejects_the_whole_result_even_if_others_are_valid(self):
+        client = _FakeLlmHttpClient(
+            response='{"narrative": "x", "evidence_tags": ["L1", "Z9"], "mentioned_measurements": []}'
+        )
+        provider = RealLLMProvider(client=client, model="test-model", max_output_tokens=500, timeout_seconds=10)
+
+        with pytest.raises(NarrativeProviderError) as exc_info:
+            provider.generate(_snapshot())
+        assert exc_info.value.code == "LLM_EVIDENCE_TAG_UNKNOWN"
+
+    def test_deduplicates_repeated_tags_while_keeping_first_seen_order(self):
+        client = _FakeLlmHttpClient(
+            response='{"narrative": "x", "evidence_tags": ["L1", "E1", "L1"], '
+            '"mentioned_measurements": []}'
+        )
+        provider = RealLLMProvider(client=client, model="test-model", max_output_tokens=500, timeout_seconds=10)
+
+        result = provider.generate(_snapshot())
+
+        assert result.cited_record_ids == ["lab_result:1", "encounter:1"]
 
 
 # ============================== Factory ======================================

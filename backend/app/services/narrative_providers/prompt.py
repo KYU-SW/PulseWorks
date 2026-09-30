@@ -3,50 +3,79 @@
 Task 19 설계 확정사항(최소 입력 데이터)을 그대로 따른다 - 환자 이름,
 MRN, 생년월일, 사용자 ID, ClinicalNote, SafetyAlert는 절대 포함하지
 않는다. 순수 함수이며 스냅샷을 수정하지 않는다.
-"""
+
+Task A(익명 근거 태그) 확정사항: 실제 source_record_ids(내부 숫자 PK가
+담긴 "type:id" 문자열)와 내부 숫자 PK는 프롬프트에 절대 포함하지 않는다.
+대신 각 항목에 이 요청 한정으로만 의미 있는 익명 태그(E=Encounter,
+D=Diagnosis, L=LabResult, P=Prescription, A=Allergy + 그 종류 안에서의
+등장 순번)를 붙이고, "태그 -> 실제 source_record_id" 매핑은
+NarrativePrompt.tag_to_source_record_id로 서버 내부에만 보존한다 -
+RealLLMProvider가 LLM이 돌려준 태그를 이 매핑으로 역매핑한다."""
+
+from dataclasses import dataclass, field
 
 from app.schemas.clinical_report import EmrSnapshot
 
 _INSTRUCTIONS = (
     "다음은 진료 기록 요약 자료다. 이 자료에 있는 사실만 근거로 삼아 "
     "한국어 설명문(narrative)을 작성하라.\n"
+    "각 항목 앞의 [태그](예: E1, D1, L1, P1, A1)는 그 항목을 가리키는 "
+    "익명 근거 표시다.\n"
     "narrative에서 언급한 모든 검사 수치는 반드시 mentioned_measurements에도 "
     "포함하라.\n"
-    "narrative를 작성하는 데 사용한 모든 근거는 cited_record_ids에 포함하라.\n"
+    "narrative를 작성하는 데 실제로 사용한 항목의 [태그]를 모두 "
+    "evidence_tags에 포함하라 - 최소 하나 이상 포함해야 한다.\n"
+    "이 자료에 없는 새로운 태그를 만들지 마라.\n"
     "이 자료에 없는 새로운 수치나 근거를 만들지 마라.\n"
     "다음을 포함하지 마라: 새로운 진단 확정, 질환 악화·호전 확정, 치료 권고, "
     "약물 추가·변경·중단 지시, 재검사 지시, 위험도 확정, 예후 예측."
 )
 
 
-def build_narrative_prompt(snapshot: EmrSnapshot) -> str:
+@dataclass(frozen=True)
+class NarrativePrompt:
+    text: str
+    # 이 호출 한정 익명 태그 -> 실제 snapshot.source_record_ids 문자열.
+    # 프롬프트 text 안에는 이 매핑의 값(실제 ID)이 등장하지 않는다.
+    tag_to_source_record_id: dict[str, str] = field(default_factory=dict)
+
+
+def build_narrative_prompt(snapshot: EmrSnapshot) -> NarrativePrompt:
+    tag_map: dict[str, str] = {}
     lines = [_INSTRUCTIONS, ""]
 
     lines.append("[진료 방문]")
-    for encounter in snapshot.encounters:
-        lines.append(f"- {encounter.department} {encounter.encounter_type} {encounter.start_time}")
+    for index, encounter in enumerate(snapshot.encounters, start=1):
+        tag = f"E{index}"
+        tag_map[tag] = f"encounter:{encounter.id}"
+        lines.append(f"- [{tag}] {encounter.department} {encounter.encounter_type} {encounter.start_time}")
 
     lines.append("[진단]")
-    for diagnosis in snapshot.diagnoses:
-        lines.append(f"- {diagnosis.description} ({diagnosis.diagnosed_at})")
+    for index, diagnosis in enumerate(snapshot.diagnoses, start=1):
+        tag = f"D{index}"
+        tag_map[tag] = f"diagnosis:{diagnosis.id}"
+        lines.append(f"- [{tag}] {diagnosis.description} ({diagnosis.diagnosed_at})")
 
     lines.append("[검사결과]")
-    for lab in snapshot.lab_results:
+    for index, lab in enumerate(snapshot.lab_results, start=1):
+        tag = f"L{index}"
+        tag_map[tag] = f"lab_result:{lab.id}"
         lines.append(
-            f"- {lab.test_name}: {lab.value}{lab.unit} "
+            f"- [{tag}] {lab.test_name}: {lab.value}{lab.unit} "
             f"(참고범위 {lab.reference_low}-{lab.reference_high}{lab.unit}, "
             f"측정 {lab.measured_at}, 판정 {lab.status})"
         )
 
     lines.append("[처방]")
-    for prescription in snapshot.prescriptions:
-        lines.append(f"- {prescription.medication_name} {prescription.dosage}")
+    for index, prescription in enumerate(snapshot.prescriptions, start=1):
+        tag = f"P{index}"
+        tag_map[tag] = f"prescription:{prescription.id}"
+        lines.append(f"- [{tag}] {prescription.medication_name} {prescription.dosage}")
 
     lines.append("[알레르기]")
-    for allergy in snapshot.allergies:
-        lines.append(f"- {allergy.substance}: {allergy.reaction} ({allergy.severity})")
+    for index, allergy in enumerate(snapshot.allergies, start=1):
+        tag = f"A{index}"
+        tag_map[tag] = f"allergy:{allergy.id}"
+        lines.append(f"- [{tag}] {allergy.substance}: {allergy.reaction} ({allergy.severity})")
 
-    lines.append("[근거 ID 목록]")
-    lines.append(", ".join(snapshot.source_record_ids))
-
-    return "\n".join(lines)
+    return NarrativePrompt(text="\n".join(lines), tag_to_source_record_id=tag_map)
