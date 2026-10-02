@@ -166,8 +166,20 @@ export function getClinicalReport(reportId: string | number): Promise<ClinicalRe
 // 이 엔드포인트에 요청 본문 파라미터를 두지 않으므로 무시된다).
 // narrative가 이미 있으면 백엔드가 그대로 기존 보고서를 200으로
 // 반환한다(멱등) — 강제 재생성 API는 없다.
-export function generateReportNarrative(reportId: string | number): Promise<ClinicalReportOut> {
-  return apiPost<ClinicalReportOut>(`/reports/${reportId}/generate-narrative`, {});
+//
+// signal(선택)은 Task D2의 프론트엔드 timeout/페이지 이동 취소에 쓰인다.
+// 주의: 이 signal로 abort해도 브라우저 쪽 대기만 중단될 뿐, 백엔드에서
+// 이미 시작된 Ollama 호출이나 그 이후의 DB 저장은 취소되지 않는다
+// (백엔드는 변경하지 않았다 — Task D2 설계 보고서 참고).
+export function generateReportNarrative(
+  reportId: string | number,
+  signal?: AbortSignal
+): Promise<ClinicalReportOut> {
+  return apiPost<ClinicalReportOut>(
+    `/reports/${reportId}/generate-narrative`,
+    {},
+    signal ? { signal } : undefined
+  );
 }
 
 // 세 서술형 필드 중 실제로 넘긴 것만 백엔드가 반영한다(model_fields_set

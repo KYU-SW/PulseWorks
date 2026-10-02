@@ -69,8 +69,11 @@ export function apiGet<T>(path: string): Promise<T> {
   return request<T>(path, { method: "GET" });
 }
 
-export function apiPost<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, { method: "POST", body: JSON.stringify(body) });
+// init은 fetch에 추가로 전달할 선택적 옵션(예: AbortSignal)이다. 기존
+// 호출부(init 생략)는 그대로 동작한다 — 이 매개변수는 하위 호환
+// 추가일 뿐, 다른 요청(승인·반려·저장 등)의 동작을 바꾸지 않는다.
+export function apiPost<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
+  return request<T>(path, { method: "POST", body: JSON.stringify(body), ...init });
 }
 
 export function apiPatch<T>(path: string, body: unknown): Promise<T> {

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -133,6 +133,7 @@ describe("ClinicalReportPreviewPage", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     sessionStorage.clear();
+    vi.useRealTimers();
   });
 
   // 21 & 22. 정상 reportId로 GET 호출, 로딩 상태
@@ -1015,5 +1016,261 @@ describe("ClinicalReportPreviewPage", () => {
       expect(String(call[0])).not.toContain("/publish");
       expect(String(call[0])).not.toContain("/patient-view");
     }
+  });
+
+  // ============ Task D2: 생성 요청 timeout·AbortController·늦은 응답 ============
+
+  const TIMEOUT_NARRATIVE_ERROR =
+    "설명문 생성이 평소보다 오래 걸리고 있습니다. 서버에서는 계속 처리 중일 수 있으니, 잠시 후 보고서를 새로고침하여 완료 여부를 확인해 주세요.";
+
+  // POST(생성) 요청을 수동으로 resolve/reject할 수 있는 fetch mock.
+  // signal이 abort되면 AbortError로 자동 reject된다(실제 브라우저
+  // fetch의 동작과 동일) — 그 외에는 테스트가 명시적으로 끝낼 때까지
+  // pending 상태를 유지한다(75초 timeout 시나리오를 제어하기 위함).
+  function mockFetchRouterControllablePost(getBody: unknown) {
+    let controls: { resolve: (v: unknown) => void; reject: (e: unknown) => void } | null = null;
+    let lastSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn().mockImplementation((_url: unknown, options?: RequestInit) => {
+      if (options?.method !== "POST") {
+        return Promise.resolve({
+          ok: true, status: 200, json: async () => getBody, text: async () => JSON.stringify(getBody),
+        });
+      }
+      lastSignal = options?.signal as AbortSignal | undefined;
+      return new Promise((resolve, reject) => {
+        controls = { resolve, reject };
+        lastSignal?.addEventListener("abort", () => {
+          const err = new Error("The operation was aborted.");
+          (err as { name: string }).name = "AbortError";
+          reject(err);
+        });
+      });
+    });
+    return {
+      fetchMock,
+      resolvePost: (v: unknown) => controls?.resolve(v),
+      rejectPost: (e: unknown) => controls?.reject(e),
+      getLastSignal: () => lastSignal,
+    };
+  }
+
+  // 거의 동시에 들어온 두 생성 요청(두 번째가 더 최신)을 흉내내기 위한
+  // mock — 첫 번째 POST는 abort되기 전까지 pending이고, 두 번째 POST만
+  // 성공으로 응답한다.
+  function mockFetchRouterForRaceTest(getBody: unknown, secondPostBody: unknown) {
+    let postCallCount = 0;
+    const fetchMock = vi.fn().mockImplementation((_url: unknown, options?: RequestInit) => {
+      if (options?.method !== "POST") {
+        return Promise.resolve({
+          ok: true, status: 200, json: async () => getBody, text: async () => JSON.stringify(getBody),
+        });
+      }
+      const callIndex = postCallCount++;
+      const signal = options?.signal as AbortSignal | undefined;
+      return new Promise((resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          const err = new Error("The operation was aborted.");
+          (err as { name: string }).name = "AbortError";
+          reject(err);
+        });
+        if (callIndex === 1) {
+          Promise.resolve().then(() => {
+            if (!signal?.aborted) {
+              resolve({
+                ok: true, status: 200,
+                json: async () => secondPostBody, text: async () => JSON.stringify(secondPostBody),
+              });
+            }
+          });
+        }
+        // callIndex === 0(첫 번째 요청)은 abort되기 전까지 그대로 pending —
+        // 두 번째 요청이 시작될 때 defensive abort로 정리되어야 한다.
+      });
+    });
+    return fetchMock;
+  }
+
+  it("passes an AbortSignal to the generate-narrative fetch call", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const { fetchMock, getLastSignal } = mockFetchRouterControllablePost(SAMPLE_REPORT);
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
+    fireEvent.click(button);
+
+    expect(getLastSignal()).toBeInstanceOf(AbortSignal);
+  });
+
+  it("does not abort or show a timeout message before 75 seconds have elapsed", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const { fetchMock, getLastSignal } = mockFetchRouterControllablePost(SAMPLE_REPORT);
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
+
+    vi.useFakeTimers();
+    fireEvent.click(button);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(74999);
+    });
+
+    expect(getLastSignal()!.aborted).toBe(false);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "설명문 초안 생성 중..." })).toBeDisabled();
+  });
+
+  it("aborts and shows the timeout notice once 75 seconds elapse, then re-enables the button", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const { fetchMock, getLastSignal } = mockFetchRouterControllablePost(SAMPLE_REPORT);
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
+
+    vi.useFakeTimers();
+    fireEvent.click(button);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(75000);
+    });
+
+    expect(getLastSignal()!.aborted).toBe(true);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(TIMEOUT_NARRATIVE_ERROR);
+    const retryButton = screen.getByRole("button", { name: "설명문 초안 생성" });
+    expect(retryButton).not.toBeDisabled();
+  });
+
+  it("clears the pending timeout when generation succeeds before 75 seconds", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const generatedReport = {
+      ...SAMPLE_REPORT,
+      content: { ...SAMPLE_REPORT.content, narrative: "생성된 설명문", narrative_source: "mock" },
+    };
+    const { fetchMock, resolvePost } = mockFetchRouterControllablePost(SAMPLE_REPORT);
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
+
+    vi.useFakeTimers();
+    fireEvent.click(button);
+
+    await act(async () => {
+      resolvePost({
+        ok: true, status: 200,
+        json: async () => generatedReport, text: async () => JSON.stringify(generatedReport),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(screen.getByDisplayValue("생성된 설명문")).toBeInTheDocument();
+
+    // 타이머가 해제되었으므로 이후 75초가 더 지나도 timeout 문구가
+    // 나타나지 않아야 한다.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(75000);
+    });
+
+    expect(screen.queryByText(TIMEOUT_NARRATIVE_ERROR)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("clears the pending timeout when generation fails before 75 seconds", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const { fetchMock, rejectPost } = mockFetchRouterControllablePost(SAMPLE_REPORT);
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
+
+    vi.useFakeTimers();
+    fireEvent.click(button);
+
+    await act(async () => {
+      rejectPost(new Error("네트워크 오류"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "설명문을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요."
+    );
+
+    // 타이머가 이미 해제되었으므로, 이후 75초가 더 지나도 timeout
+    // 문구로 바뀌지 않아야 한다(기존 일반 오류 문구가 그대로 유지됨).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(75000);
+    });
+
+    expect(screen.queryByText(TIMEOUT_NARRATIVE_ERROR)).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "설명문을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요."
+    );
+  });
+
+  it("aborts the active request and clears its pending timeout on unmount, without showing any error", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const { fetchMock, getLastSignal, resolvePost } = mockFetchRouterControllablePost(SAMPLE_REPORT);
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = renderPreviewPage();
+
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
+    fireEvent.click(button);
+
+    expect(getLastSignal()).toBeDefined();
+    expect(getLastSignal()!.aborted).toBe(false);
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    unmount();
+    expect(getLastSignal()!.aborted).toBe(true);
+
+    // 언마운트 이후 늦게 응답이 "도착"해도(실제로는 이미 abort로 reject된
+    // 뒤라 아무 효과가 없지만, 방어적으로) 컴포넌트는 이미 사라졌으므로
+    // 아무 것도 갱신되지 않고 React 경고도 발생하지 않아야 한다.
+    resolvePost({
+      ok: true, status: 200, json: async () => SAMPLE_REPORT, text: async () => JSON.stringify(SAMPLE_REPORT),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("lets a newer generation request supersede an older one and ignores the older request's late outcome", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const secondGeneratedReport = {
+      ...SAMPLE_REPORT,
+      content: { ...SAMPLE_REPORT.content, narrative: "두 번째 요청의 결과", narrative_source: "mock" },
+    };
+    const fetchMock = mockFetchRouterForRaceTest(SAMPLE_REPORT, secondGeneratedReport);
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
+
+    // 사용자가 버튼이 아직 disabled로 반영되기 전에 거의 동시에 두 번
+    // 클릭한 상황을 흉내낸다(act() 콜백이 끝나기 전까지 React는 상태
+    // 반영을 미루므로, 두 click() 모두 같은 "아직 생성 중이 아님" 상태를
+    // 본다).
+    act(() => {
+      button.click();
+      button.click();
+    });
+
+    await screen.findByDisplayValue("두 번째 요청의 결과");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("설명문 초안이 생성되었습니다. 내용을 검토한 뒤 저장하거나 승인하세요.")
+    ).toBeInTheDocument();
+
+    const postCalls = fetchMock.mock.calls.filter(
+      (call: any[]) => (call[1] as RequestInit)?.method === "POST"
+    );
+    expect(postCalls).toHaveLength(2);
   });
 });

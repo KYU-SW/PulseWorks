@@ -37,6 +37,23 @@ const GENERIC_REJECT_ERROR = "보고서를 반려하지 못했습니다. 잠시 
 // detail 메시지를 주는 일반적인 경우(503/502)에는 그 메시지를 그대로
 // 쓴다(아래 handleGenerateNarrative).
 const GENERIC_NARRATIVE_ERROR = "설명문을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+// Task D2: 프론트엔드 timeout 전용 안내 — 서버/Ollama 작업은 프론트
+// abort로 취소되지 않으므로, 확정된 실패가 아니라 "계속 처리 중일 수
+// 있다"는 사실을 정직하게 알리고 새로고침으로 확인하도록 안내한다.
+const TIMEOUT_NARRATIVE_ERROR =
+  "설명문 생성이 평소보다 오래 걸리고 있습니다. 서버에서는 계속 처리 중일 수 있으니, 잠시 후 보고서를 새로고침하여 완료 여부를 확인해 주세요.";
+const NARRATIVE_TIMEOUT_MS = 75000;
+
+// AbortController.abort()로 발생하는 오류는 브라우저에서는 DOMException,
+// 테스트 환경에서는 평범한 Error일 수 있어 instanceof 체크에 의존하지
+// 않고 name만으로 판별한다.
+function isAbortError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { name?: unknown }).name === "AbortError"
+  );
+}
 
 // 유효한 report_id 형식(양의 정수)이 아니면 API를 호출하지 않고 바로
 // 404와 동일한 일반화된 안내를 보여준다.
@@ -114,6 +131,16 @@ export default function ClinicalReportPreviewPage() {
   const [narrativeError, setNarrativeError] = useState<string | null>(null);
   const [narrativeSucceeded, setNarrativeSucceeded] = useState(false);
 
+  // Task D2: timeout/페이지 이동 취소/늦은 응답 무시를 위한 상태.
+  // state가 아니라 ref로 두는 이유 — 렌더링과 무관하게 비동기 콜백
+  // (setTimeout, fetch의 성공/실패 콜백)에서 "지금 활성 요청이 맞는지"를
+  // 확인하는 용도이기 때문이다.
+  const narrativeAbortControllerRef = useRef<AbortController | null>(null);
+  const narrativeTimeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const narrativeRequestIdRef = useRef(0);
+  const narrativeTimedOutRequestIdRef = useRef<number | null>(null);
+  const isMountedRef = useRef(true);
+
   const [editableNarrative, setEditableNarrative] = useState("");
   const [editableHandoffNote, setEditableHandoffNote] = useState("");
   const [editablePatientGuidance, setEditablePatientGuidance] = useState("");
@@ -166,16 +193,57 @@ export default function ClinicalReportPreviewPage() {
 
   async function handleGenerateNarrative() {
     if (!report || isGeneratingNarrative) return; // 중복 요청 방지
+
+    // 방어적 처리: 이미 활성 요청이 남아 있다면(정상적으로는 버튼이
+    // disabled라 발생하지 않지만) 먼저 안전하게 정리한다.
+    if (narrativeAbortControllerRef.current) {
+      narrativeAbortControllerRef.current.abort();
+    }
+    if (narrativeTimeoutIdRef.current) {
+      clearTimeout(narrativeTimeoutIdRef.current);
+      narrativeTimeoutIdRef.current = null;
+    }
+
+    const requestId = ++narrativeRequestIdRef.current;
+    const controller = new AbortController();
+    narrativeAbortControllerRef.current = controller;
+
     setNarrativeError(null);
     setNarrativeSucceeded(false); // 새 생성 시작 전 이전 성공 안내를 지운다.
     setIsGeneratingNarrative(true);
+
+    narrativeTimeoutIdRef.current = setTimeout(() => {
+      // 이 요청이 이미 다른 요청으로 대체됐다면 아무것도 하지 않는다.
+      if (narrativeRequestIdRef.current !== requestId) return;
+      narrativeTimedOutRequestIdRef.current = requestId;
+      controller.abort();
+    }, NARRATIVE_TIMEOUT_MS);
+
     try {
-      const updated = await generateReportNarrative(report.id);
+      const updated = await generateReportNarrative(report.id, controller.signal);
+
+      // 늦게 도착한 응답(이미 새 요청이 시작됐거나 언마운트됨)은 화면
+      // 상태를 절대 덮어쓰지 않는다.
+      if (!isMountedRef.current || narrativeRequestIdRef.current !== requestId) return;
+
       // 반환된 ClinicalReport로 화면 상태만 갱신한다 — 전체 페이지 새로고침이나
       // 추가 EMR API 호출 없음.
       setReport(updated);
       setNarrativeSucceeded(true);
     } catch (err) {
+      if (!isMountedRef.current || narrativeRequestIdRef.current !== requestId) return;
+
+      if (isAbortError(err)) {
+        // timeout으로 인한 abort만 사용자에게 안내한다. 언마운트나(다른
+        // 요청으로 대체되는 경우는 위에서 이미 걸러짐) 그 외의 abort는
+        // 보여줄 화면이 없거나 보여줄 필요가 없으므로 아무 문구도
+        // 표시하지 않는다.
+        if (narrativeTimedOutRequestIdRef.current === requestId) {
+          setNarrativeError(TIMEOUT_NARRATIVE_ERROR);
+        }
+        return;
+      }
+
       if (err instanceof ApiError && err.status === 401) return; // 전역 처리
       if (err instanceof ApiError && err.status === 502) {
         // 검증 실패 — 백엔드의 안전한 문구에 "내용은 바뀌지 않았다"는
@@ -191,7 +259,18 @@ export default function ClinicalReportPreviewPage() {
         setNarrativeError(GENERIC_NARRATIVE_ERROR);
       }
     } finally {
-      setIsGeneratingNarrative(false);
+      if (narrativeRequestIdRef.current === requestId) {
+        if (narrativeTimeoutIdRef.current) {
+          clearTimeout(narrativeTimeoutIdRef.current);
+          narrativeTimeoutIdRef.current = null;
+        }
+        if (narrativeAbortControllerRef.current === controller) {
+          narrativeAbortControllerRef.current = null;
+        }
+        if (isMountedRef.current) {
+          setIsGeneratingNarrative(false);
+        }
+      }
     }
   }
 
@@ -277,6 +356,22 @@ export default function ClinicalReportPreviewPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId]);
+
+  // Task D2: 페이지 이동 등으로 컴포넌트가 사라지면 진행 중인 설명문
+  // 생성 요청을 취소하고, 이후 그 요청의 결과가 와도 이미 사라진
+  // 컴포넌트의 상태를 바꾸지 않도록 한다.
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      if (narrativeAbortControllerRef.current) {
+        narrativeAbortControllerRef.current.abort();
+      }
+      if (narrativeTimeoutIdRef.current) {
+        clearTimeout(narrativeTimeoutIdRef.current);
+        narrativeTimeoutIdRef.current = null;
+      }
+    };
+  }, []);
 
   const canGenerateNarrative =
     !!report && report.status === "DRAFT" && report.content.narrative === null;
