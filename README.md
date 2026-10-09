@@ -2,7 +2,7 @@
 
 **Web-Based EMR with an Evidence-Grounded Clinical Report Copilot**
 
-의료IT학과 학부 1학년 2학기 융합설계 기본(01분반)과목 프로토타입.
+의료IT학과 학부 2학기 융합설계 기본(01분반)과목 프로토타입.
 
 ## 1. 프로젝트 소개
 
