@@ -56,6 +56,18 @@ export type PatientAllergy = {
   severity: string;
 };
 
+// Task F4-B: value/value_secondary는 Decimal을 그대로 직렬화한 문자열이다
+// (정밀도 보존). 내부 id, quality_warnings, bmi, V Evidence Tag,
+// source_record_id는 이 타입 어디에도 없다 - 백엔드 화이트리스트
+// 스키마(PatientVitalSignOut)와 정확히 일치해야 한다.
+export type PatientVitalSign = {
+  vital_type: string;
+  value: string;
+  value_secondary: string | null;
+  unit: string;
+  measured_at: string;
+};
+
 export type PatientClinicalReportDetail = {
   id: number;
   department: string;
@@ -69,6 +81,7 @@ export type PatientClinicalReportDetail = {
   lab_trends: PatientLabTrendGroup[];
   prescriptions: PatientPrescription[];
   allergies: PatientAllergy[];
+  vital_signs: PatientVitalSign[];
   evidence: string[];
   safety_notice: string;
 };

@@ -20,6 +20,18 @@ class MentionedMeasurementIn(BaseModel):
     unit: str
 
 
+class MentionedVitalSignIn(BaseModel):
+    """Task F4-B: MentionedMeasurementIn과 같은 역할을 VitalSign에 대해
+    담당한다. value_secondary는 BLOOD_PRESSURE의 이완기 값에만 쓴다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vital_type: str
+    value: float
+    value_secondary: float | None = None
+    unit: str
+
+
 class LlmStructuredOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -39,3 +51,7 @@ class LlmStructuredOutput(BaseModel):
         ),
     )
     mentioned_measurements: list[MentionedMeasurementIn] = Field(default_factory=list)
+    # Task F4-B: VitalSign 전용 - mentioned_measurements(LabResult)와 같은
+    # 자기 보고 계약을 공유하지 않는다(단위·혈압 두 component가 다른
+    # 구조라 별도 필드).
+    mentioned_vital_signs: list[MentionedVitalSignIn] = Field(default_factory=list)

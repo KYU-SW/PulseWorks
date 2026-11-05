@@ -237,7 +237,7 @@ def test_detail_success_returns_expected_top_level_fields(db_session, override_g
     assert set(body.keys()) == {
         "id", "department", "encounter_type", "encounter_date", "reviewed_at", "narrative",
         "patient_guidance", "diagnoses", "lab_results", "lab_trends", "prescriptions",
-        "allergies", "evidence", "safety_notice",
+        "allergies", "vital_signs", "evidence", "safety_notice",
     }
     assert body["department"] == "ENDOCRINOLOGY"
     assert body["encounter_type"] == "OUTPATIENT"
@@ -288,10 +288,11 @@ def test_detail_never_exposes_internal_fields_anywhere(db_session, override_get_
         "safety_alerts", "clinical_notes", "preview_text", "prescribed_by_user_id",
         # Task D1: narrative 출처 메타데이터는 의사 화면 전용이다.
         "narrative_source", "narrative_edited_by_clinician", "provider", "vendor", "model",
-        # Task F4-A: 이 Encounter에 실제로 VitalSign·BMI가 있는데도(위에서
-        # seed된 7종 + BMI 계산 가능 사례) 환자 화면에는 전혀 노출되지
-        # 않아야 한다 — EmrSnapshot 자체에 아직 연결되지 않았기 때문이다.
-        "vital_type", "vital_signs", "value_secondary", "quality_warnings", "bmi",
+        # Task F4-B: VitalSign의 "값"은 vital_signs 필드로 이제 노출되지만
+        # (test_detail_exposes_vital_signs_from_snapshot_only 참고),
+        # 품질 경고와 BMI는 F4-A처럼 여전히 의사 화면 전용이다 — 둘 다
+        # 조회 시점에 계산하는 파생값이고 Snapshot 자체에 없다.
+        "quality_warnings", "bmi",
     ]:
         assert f'"{forbidden_key}"' not in raw_text
 
@@ -306,6 +307,56 @@ def test_detail_never_exposes_internal_fields_anywhere(db_session, override_get_
         assert set(prescription_out.keys()) == {"medication_name", "dosage", "prescribed_at"}
     for allergy_out in body["allergies"]:
         assert set(allergy_out.keys()) == {"substance", "reaction", "severity"}
+
+
+# ============================== Task F4-B: VitalSign ========================
+
+
+def test_detail_exposes_vital_signs_from_snapshot_only(db_session, override_get_db):
+    seed(db_session)
+    patient = _patient_by_mrn(db_session, "SYN-0001")
+    doctor_token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    first_encounter_id = _encounter_ids(db_session, patient.id)[0]
+    approved = _approved_report(doctor_token, patient.id, first_encounter_id)
+
+    patient_token = _login(PATIENT1_EMAIL)
+    response = client.get(f"/patient/reports/{approved['id']}", headers=_auth_header(patient_token))
+
+    body = response.json()
+    assert len(body["vital_signs"]) == 7
+    for vital in body["vital_signs"]:
+        assert set(vital.keys()) == {
+            "vital_type", "value", "value_secondary", "unit", "measured_at",
+        }
+    blood_pressure = next(v for v in body["vital_signs"] if v["vital_type"] == "BLOOD_PRESSURE")
+    assert blood_pressure["value"] == "120.000"
+    assert blood_pressure["value_secondary"] == "80.000"
+    assert blood_pressure["unit"] == "mmHg"
+
+
+def test_detail_vital_signs_unaffected_by_later_changes_to_the_original_record(
+    db_session, override_get_db
+):
+    # Task F4-B §11: 승인된 보고서는 승인 시점의 Snapshot만 보여준다 —
+    # 원본 VitalSign 테이블이 나중에 바뀌어도(수정·삭제) 이미 승인된
+    # 보고서 응답은 그대로여야 한다.
+    seed(db_session)
+    patient = _patient_by_mrn(db_session, "SYN-0001")
+    doctor_token = _login(ENDOCRINE_DOCTOR_EMAIL)
+    first_encounter_id = _encounter_ids(db_session, patient.id)[0]
+    approved = _approved_report(doctor_token, patient.id, first_encounter_id)
+
+    from app.models import VitalSign
+
+    db_session.query(VitalSign).filter_by(encounter_id=first_encounter_id).delete()
+    db_session.commit()
+    assert db_session.query(VitalSign).filter_by(encounter_id=first_encounter_id).count() == 0
+
+    patient_token = _login(PATIENT1_EMAIL)
+    response = client.get(f"/patient/reports/{approved['id']}", headers=_auth_header(patient_token))
+
+    assert response.status_code == 200
+    assert len(response.json()["vital_signs"]) == 7
 
 
 def test_detail_404_for_nonexistent_report(db_session, override_get_db):

@@ -11,6 +11,7 @@ from app.schemas.narrative_provider import LlmStructuredOutput
 from app.services.mock_narrative import generate_mock_report_narrative
 from app.services.narrative_providers.base import (
     MentionedMeasurement,
+    MentionedVitalSign,
     NarrativeProviderError,
     NarrativeProviderResult,
 )
@@ -73,6 +74,28 @@ def _full_snapshot() -> EmrSnapshot:
                 "id": 3, "substance": "Penicillin", "reaction": "두드러기", "severity": "MODERATE",
                 "recorded_at": "2026-01-01T09:00:00Z", "source_type": "INSTITUTION_GENERATED",
             }
+        ],
+    )
+
+
+def _full_snapshot_with_vitals() -> EmrSnapshot:
+    """Task F4-B: _full_snapshot()에 VitalSign 2건(혈압 + 체온)을 추가한
+    스냅샷 - V 태그 전용 테스트에 쓴다."""
+    return _snapshot(
+        diagnoses=_full_snapshot().diagnoses,
+        prescriptions=_full_snapshot().prescriptions,
+        allergies=_full_snapshot().allergies,
+        vital_signs=[
+            {
+                "id": 11, "encounter_id": 1, "vital_type": "BLOOD_PRESSURE",
+                "value": "120", "value_secondary": "80", "unit": "mmHg",
+                "measured_at": "2026-03-10T09:00:00Z",
+            },
+            {
+                "id": 12, "encounter_id": 1, "vital_type": "BODY_TEMPERATURE",
+                "value": "36.5", "value_secondary": None, "unit": "Cel",
+                "measured_at": "2026-03-10T09:05:00Z",
+            },
         ],
     )
 
@@ -252,6 +275,42 @@ class TestBuildNarrativePrompt:
         assert "외래" in prompt.text
         assert "OUTPATIENT" not in prompt.text
 
+    # --- Task F4-B: V Evidence Tag ------------------------------------------
+
+    def test_assigns_v_tags_to_vital_signs_in_snapshot_order(self):
+        prompt = build_narrative_prompt(_full_snapshot_with_vitals())
+
+        assert prompt.tag_to_source_record_id["V1"] == "vital_sign:11"
+        assert prompt.tag_to_source_record_id["V2"] == "vital_sign:12"
+
+    def test_blood_pressure_line_includes_both_components(self):
+        prompt = build_narrative_prompt(_full_snapshot_with_vitals())
+
+        assert "120" in prompt.text
+        assert "80" in prompt.text
+        assert "[V1]" in prompt.text
+
+    def test_v_tags_appear_in_the_allowed_tags_block(self):
+        prompt = build_narrative_prompt(_full_snapshot_with_vitals())
+
+        allowed_line = next(line for line in prompt.text.splitlines() if line.startswith("[사용 가능한 태그]"))
+        assert "V1" in allowed_line
+        assert "V2" in allowed_line
+
+    def test_no_vital_signs_contribute_no_v_tags(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+
+        assert not any(tag.startswith("V") for tag in prompt.tag_to_source_record_id)
+        allowed_line = next(line for line in prompt.text.splitlines() if line.startswith("[사용 가능한 태그]"))
+        assert "V1" not in allowed_line
+
+    def test_vital_sign_internal_ids_never_appear_in_the_prompt(self):
+        snapshot = _full_snapshot_with_vitals()
+        prompt = build_narrative_prompt(snapshot)
+
+        assert "vital_sign:11" not in prompt.text
+        assert "vital_sign:12" not in prompt.text
+
     def test_unmapped_department_falls_back_to_the_raw_value_instead_of_guessing(self):
         snapshot = _snapshot(
             encounters=[
@@ -315,6 +374,14 @@ VALID_LLM_JSON = (
     '"mentioned_measurements": [{"test_name": "HbA1c", "value": 8.1, "unit": "%"}]}'
 )
 
+VALID_LLM_JSON_WITH_VITAL_SIGN = (
+    '{"narrative": "혈압은 120/80mmHg입니다.", '
+    '"evidence_tags": ["V1"], '
+    '"mentioned_measurements": [], '
+    '"mentioned_vital_signs": [{"vital_type": "BLOOD_PRESSURE", "value": 120, '
+    '"value_secondary": 80, "unit": "mmHg"}]}'
+)
+
 
 class TestRealLLMProvider:
     def test_parses_a_valid_json_response(self):
@@ -374,6 +441,34 @@ class TestRealLLMProvider:
         with pytest.raises(NarrativeProviderError) as exc_info:
             provider.generate(_snapshot())
         assert exc_info.value.code == "LLM_REQUEST_FAILED"
+
+    # --- Task F4-B: mentioned_vital_signs ------------------------------------
+
+    def test_parses_mentioned_vital_signs_from_a_valid_response(self):
+        client = _FakeLlmHttpClient(response=VALID_LLM_JSON_WITH_VITAL_SIGN)
+        provider = RealLLMProvider(client=client, model="test-model", max_output_tokens=500, timeout_seconds=10)
+
+        result = provider.generate(_full_snapshot_with_vitals())
+
+        assert result.mentioned_vital_signs == [
+            MentionedVitalSign("BLOOD_PRESSURE", 120, 80, "mmHg")
+        ]
+
+    def test_resolves_the_v_tag_to_the_real_vital_sign_source_id(self):
+        client = _FakeLlmHttpClient(response=VALID_LLM_JSON_WITH_VITAL_SIGN)
+        provider = RealLLMProvider(client=client, model="test-model", max_output_tokens=500, timeout_seconds=10)
+
+        result = provider.generate(_full_snapshot_with_vitals())
+
+        assert result.cited_record_ids == ["vital_sign:11"]
+
+    def test_defaults_mentioned_vital_signs_to_empty_list_when_absent(self):
+        client = _FakeLlmHttpClient(response=VALID_LLM_JSON)
+        provider = RealLLMProvider(client=client, model="test-model", max_output_tokens=500, timeout_seconds=10)
+
+        result = provider.generate(_snapshot())
+
+        assert result.mentioned_vital_signs == []
 
     def test_never_lets_the_llm_self_report_provider_model_version(self):
         # provider/model/version 필드가 LLM 출력 스키마에 아예 없으므로,

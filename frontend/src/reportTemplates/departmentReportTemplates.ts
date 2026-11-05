@@ -7,6 +7,7 @@ const SECTION_DEFAULTS: Record<string, ReportSectionConfig> = {
   selected_encounter: {
     id: "selected_encounter", title: "선택 Encounter", emptyBehavior: "show_empty_state",
   },
+  vital_signs: { id: "vital_signs", title: "활력징후", emptyBehavior: "hide" },
   diagnoses: { id: "diagnoses", title: "주요 진단", emptyBehavior: "hide" },
   lab_trends: { id: "lab_trends", title: "검사 추세", emptyBehavior: "hide" },
   lab_results: { id: "lab_results", title: "검사결과", emptyBehavior: "hide" },
@@ -26,28 +27,30 @@ export const DEPARTMENT_REPORT_TEMPLATES: Record<ReportDepartment, DepartmentRep
     department: "ENDOCRINOLOGY",
     sections: sections(
       "patient_info", "diagnoses", "lab_trends", "lab_results", "selected_encounter",
-      "prescriptions", "allergies", "safety_alerts", "clinical_notes", "source_record_ids"
+      "vital_signs", "prescriptions", "allergies", "safety_alerts", "clinical_notes",
+      "source_record_ids"
     ),
   },
   ORTHOPEDICS: {
     department: "ORTHOPEDICS",
     sections: sections(
-      "patient_info", "diagnoses", "selected_encounter", "prescriptions", "clinical_notes",
-      "lab_results", "allergies", "safety_alerts", "source_record_ids"
+      "patient_info", "diagnoses", "selected_encounter", "vital_signs", "prescriptions",
+      "clinical_notes", "lab_results", "allergies", "safety_alerts", "source_record_ids"
     ),
   },
   EMERGENCY_MEDICINE: {
     department: "EMERGENCY_MEDICINE",
     sections: sections(
-      "patient_info", "selected_encounter", "diagnoses", "lab_results", "prescriptions",
-      "allergies", "safety_alerts", "clinical_notes", "source_record_ids"
+      "patient_info", "selected_encounter", "vital_signs", "diagnoses", "lab_results",
+      "prescriptions", "allergies", "safety_alerts", "clinical_notes", "source_record_ids"
     ),
   },
   DEFAULT: {
     department: "DEFAULT",
     sections: sections(
-      "patient_info", "selected_encounter", "diagnoses", "lab_results", "lab_trends",
-      "prescriptions", "allergies", "safety_alerts", "clinical_notes", "source_record_ids"
+      "patient_info", "selected_encounter", "vital_signs", "diagnoses", "lab_results",
+      "lab_trends", "prescriptions", "allergies", "safety_alerts", "clinical_notes",
+      "source_record_ids"
     ),
   },
 };

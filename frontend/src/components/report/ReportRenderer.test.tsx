@@ -63,6 +63,13 @@ function baseSnapshot(overrides: Partial<ReportContentSnapshot["emr_snapshot"]> 
         created_at: "2026-03-10T09:00:00Z", source_type: "INSTITUTION_GENERATED",
       },
     ],
+    vital_signs: [
+      {
+        id: 1, encounter_id: 1, vital_type: "BLOOD_PRESSURE",
+        value: "120.000", value_secondary: "80.000", unit: "mmHg",
+        measured_at: "2026-03-10T09:00:00Z",
+      },
+    ],
     source_record_ids: ["encounter:1", "diagnosis:1"],
     ...overrides,
   };
@@ -94,7 +101,7 @@ it("always shows patient_info and selected_encounter", () => {
 it("orders ENDOCRINOLOGY report sections as specified", () => {
   render(<ReportRenderer content={contentFor()} />);
   expect(headingTexts()).toEqual([
-    "환자 기본정보", "주요 진단", "검사 추세", "검사결과", "선택 Encounter",
+    "환자 기본정보", "주요 진단", "검사 추세", "검사결과", "선택 Encounter", "활력징후",
     "처방 기록", "알레르기", "안전 알림", "진료기록 미리보기", "근거 기록",
   ]);
 });
@@ -108,7 +115,7 @@ it("orders ORTHOPEDICS report sections as specified", () => {
   });
   render(<ReportRenderer content={content} />);
   expect(headingTexts()).toEqual([
-    "환자 기본정보", "주요 진단", "선택 Encounter", "처방 기록", "진료기록 미리보기",
+    "환자 기본정보", "주요 진단", "선택 Encounter", "활력징후", "처방 기록", "진료기록 미리보기",
     "검사결과", "알레르기", "안전 알림", "근거 기록",
   ]);
 });
@@ -122,7 +129,7 @@ it("orders EMERGENCY_MEDICINE report sections as specified", () => {
   });
   render(<ReportRenderer content={content} />);
   expect(headingTexts()).toEqual([
-    "환자 기본정보", "선택 Encounter", "주요 진단", "검사결과", "처방 기록",
+    "환자 기본정보", "선택 Encounter", "활력징후", "주요 진단", "검사결과", "처방 기록",
     "알레르기", "안전 알림", "진료기록 미리보기", "근거 기록",
   ]);
 });
@@ -136,7 +143,7 @@ it("orders DEFAULT report sections for an unknown department", () => {
   });
   render(<ReportRenderer content={content} />);
   expect(headingTexts()).toEqual([
-    "환자 기본정보", "선택 Encounter", "주요 진단", "검사결과", "검사 추세",
+    "환자 기본정보", "선택 Encounter", "활력징후", "주요 진단", "검사결과", "검사 추세",
     "처방 기록", "알레르기", "안전 알림", "진료기록 미리보기", "근거 기록",
   ]);
 });
@@ -191,10 +198,22 @@ it("never mutates the input content object", () => {
   expect(content).toEqual(before);
 });
 
-// 23. 영상 img 요소 없음 & 24. vitals 섹션 없음
-it("never renders an img element and never renders a vitals section", () => {
+// 23. 영상 img 요소 없음
+it("never renders an img element", () => {
   render(<ReportRenderer content={contentFor()} />);
   expect(screen.queryByRole("img")).not.toBeInTheDocument(); // svg role="img"도 없어야 함(lab_trends 그래프는 2점 이상일 때만 등장)
+});
+
+// Task F4-B: VitalSign이 있으면 "활력징후" 섹션이 보이고, 없으면 숨는다.
+it("shows the vital_signs section with formatted blood pressure when vital signs exist", () => {
+  render(<ReportRenderer content={contentFor()} />);
+  expect(screen.getByRole("heading", { name: "활력징후" })).toBeInTheDocument();
+  expect(screen.getByText(/120\/80\s*mmHg/)).toBeInTheDocument();
+});
+
+it("hides the vital_signs section when there are no vital signs", () => {
+  const content = contentFor({ vital_signs: [] });
+  render(<ReportRenderer content={content} />);
   expect(headingTexts()).not.toContain("활력징후");
 });
 

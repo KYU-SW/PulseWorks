@@ -49,23 +49,24 @@ describe("section order per department", () => {
     const ids = DEPARTMENT_REPORT_TEMPLATES.ENDOCRINOLOGY.sections.map((s) => s.id);
     expect(ids).toEqual([
       "patient_info", "diagnoses", "lab_trends", "lab_results", "selected_encounter",
-      "prescriptions", "allergies", "safety_alerts", "clinical_notes", "source_record_ids",
+      "vital_signs", "prescriptions", "allergies", "safety_alerts", "clinical_notes",
+      "source_record_ids",
     ]);
   });
 
   it("orders ORTHOPEDICS sections as specified", () => {
     const ids = DEPARTMENT_REPORT_TEMPLATES.ORTHOPEDICS.sections.map((s) => s.id);
     expect(ids).toEqual([
-      "patient_info", "diagnoses", "selected_encounter", "prescriptions", "clinical_notes",
-      "lab_results", "allergies", "safety_alerts", "source_record_ids",
+      "patient_info", "diagnoses", "selected_encounter", "vital_signs", "prescriptions",
+      "clinical_notes", "lab_results", "allergies", "safety_alerts", "source_record_ids",
     ]);
   });
 
   it("orders EMERGENCY_MEDICINE sections as specified", () => {
     const ids = DEPARTMENT_REPORT_TEMPLATES.EMERGENCY_MEDICINE.sections.map((s) => s.id);
     expect(ids).toEqual([
-      "patient_info", "selected_encounter", "diagnoses", "lab_results", "prescriptions",
-      "allergies", "safety_alerts", "clinical_notes", "source_record_ids",
+      "patient_info", "selected_encounter", "vital_signs", "diagnoses", "lab_results",
+      "prescriptions", "allergies", "safety_alerts", "clinical_notes", "source_record_ids",
     ]);
   });
 });
@@ -74,13 +75,16 @@ describe("section order per department", () => {
 it("orders DEFAULT sections as specified", () => {
   const ids = DEPARTMENT_REPORT_TEMPLATES.DEFAULT.sections.map((s) => s.id);
   expect(ids).toEqual([
-    "patient_info", "selected_encounter", "diagnoses", "lab_results", "lab_trends",
-    "prescriptions", "allergies", "safety_alerts", "clinical_notes", "source_record_ids",
+    "patient_info", "selected_encounter", "vital_signs", "diagnoses", "lab_results",
+    "lab_trends", "prescriptions", "allergies", "safety_alerts", "clinical_notes",
+    "source_record_ids",
   ]);
 });
 
-// vitals/imaging_placeholder가 어떤 템플릿에도 존재하지 않음
-it("never includes vitals or imaging_placeholder in any template", () => {
+// vitals(구 이름)/imaging_placeholder가 어떤 템플릿에도 존재하지 않음.
+// "vital_signs"(Task F4-B)는 이 가드가 금지하는 대상이 아니다 — 금지된
+// 것은 Task 14에서 거부된 옛 이름 "vitals"뿐이다.
+it("never includes the old 'vitals' name or imaging_placeholder in any template", () => {
   for (const template of Object.values(DEPARTMENT_REPORT_TEMPLATES)) {
     const ids = template.sections.map((s) => s.id);
     expect(ids).not.toContain("vitals");

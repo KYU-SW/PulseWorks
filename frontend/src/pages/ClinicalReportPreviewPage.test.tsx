@@ -65,6 +65,7 @@ const SAMPLE_REPORT = {
         },
       ],
       clinical_notes: [],
+      vital_signs: [],
       source_record_ids: ["encounter:1", "diagnosis:1"],
     },
     narrative: null,

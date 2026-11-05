@@ -118,6 +118,51 @@ def test_narrative_source_and_edited_default_when_absent_from_stored_json(db_ses
     assert reparsed.narrative_edited_by_clinician is False
 
 
+# Task F4-B: VitalSign이 EmrSnapshot에 동결된다.
+def test_vital_signs_are_included_in_the_snapshot(db_session):
+    report_data = _first_encounter_report_data(db_session)
+    snapshot = EmrSnapshot.model_validate(report_data)
+
+    assert len(snapshot.vital_signs) == 7
+    assert {v.vital_type for v in snapshot.vital_signs} == {
+        "BLOOD_PRESSURE", "BODY_HEIGHT", "BODY_WEIGHT", "BODY_TEMPERATURE",
+        "HEART_RATE", "RESPIRATORY_RATE", "PULSE_OXIMETRY",
+    }
+
+
+def test_vital_signs_round_trip_through_json_preserving_decimal_precision(db_session):
+    report_data = _first_encounter_report_data(db_session)
+    snapshot = ReportContentSnapshot(
+        emr_snapshot=EmrSnapshot.model_validate(report_data), narrative=None,
+        handoff_note=None, patient_guidance=None,
+    )
+
+    dumped = snapshot.model_dump(mode="json")
+    reparsed = ReportContentSnapshot.model_validate(dumped)
+
+    bp = next(v for v in reparsed.emr_snapshot.vital_signs if v.vital_type == "BLOOD_PRESSURE")
+    # Numeric(10,3) 컬럼이 저장 시 소수점 3자리로 맞추므로 "120.000"이다 —
+    # 정밀도 보존(F4-A에서 이미 확인된 Decimal API 계약).
+    assert str(bp.value) == "120.000"
+    assert str(bp.value_secondary) == "80.000"
+    assert bp.unit == "mmHg"
+
+
+# Task F4-B: vital_signs가 아예 없는 과거 Snapshot도 기본값([])으로 파싱된다
+# (Task D1의 narrative_source/narrative_edited_by_clinician과 동일한 원칙).
+def test_vital_signs_defaults_to_empty_list_when_absent_from_stored_json(db_session):
+    report_data = _first_encounter_report_data(db_session)
+    legacy_stored_dict = ReportContentSnapshot(
+        emr_snapshot=EmrSnapshot.model_validate(report_data), narrative=None,
+        handoff_note=None, patient_guidance=None,
+    ).model_dump(mode="json")
+    del legacy_stored_dict["emr_snapshot"]["vital_signs"]
+
+    reparsed = ReportContentSnapshot.model_validate(legacy_stored_dict)
+
+    assert reparsed.emr_snapshot.vital_signs == []
+
+
 def test_narrative_source_and_edited_round_trip_through_json(db_session):
     report_data = _first_encounter_report_data(db_session)
     snapshot = ReportContentSnapshot(

@@ -52,6 +52,20 @@ _ENCOUNTER_TYPE_LABELS = {
     "EMERGENCY": "응급",
 }
 
+# Task F4-B: app/routers/encounters.py의 _VITAL_TYPE_LABELS와 동일한 값 -
+# 그 파일은 VitalType Enum 키를, 이 파일은 EmrSnapshot이 이미 .value로
+# 변환한 문자열 키를 쓴다는 점만 다르다(다른 여러 서비스가 각자 독립적으로
+# 라벨을 선언하는 이 프로젝트의 기존 패턴과 동일).
+_VITAL_TYPE_LABELS = {
+    "BLOOD_PRESSURE": "혈압",
+    "BODY_HEIGHT": "키",
+    "BODY_WEIGHT": "체중",
+    "BODY_TEMPERATURE": "체온",
+    "HEART_RATE": "맥박",
+    "RESPIRATORY_RATE": "호흡수",
+    "PULSE_OXIMETRY": "산소포화도",
+}
+
 _INSTRUCTIONS = (
     "다음은 진료 기록 요약 자료다. 이 자료에 있는 사실만 근거로 삼아 "
     "한국어 설명문(narrative)을 작성하라.\n"
@@ -67,7 +81,7 @@ _EVIDENCE_TAGS_REMINDER = (
     "최소 1개 이상 포함하라. 목록에 없는 태그를 만들지 마라.\n"
     "evidence_tags는 JSON의 evidence_tags 필드에만 넣는다. narrative는 "
     "환자가 읽는 자연어 설명문이다 - narrative 본문에는 E1, D1, L1, P1, "
-    "A1 같은 태그를 [ ], ( ), { }로 감싸 쓰거나 \"근거 E1\", \"출처 D1\" "
+    "A1, V1 같은 태그를 [ ], ( ), { }로 감싸 쓰거나 \"근거 E1\", \"출처 D1\" "
     "처럼 인용하지 마라. 태그는 애플리케이션 내부 근거 연결에만 쓰인다."
 )
 
@@ -119,6 +133,21 @@ def build_narrative_prompt(snapshot: EmrSnapshot) -> NarrativePrompt:
         tag = f"A{index}"
         tag_map[tag] = f"allergy:{allergy.id}"
         lines.append(f"- [{tag}] {allergy.substance}: {allergy.reaction} ({allergy.severity})")
+
+    # Task F4-B: VitalSign은 다른 5종과 같은 "익명 태그 + 해당 자리에만
+    # 등장" 규칙을 따른다 - 내부 PK(id)는 여기서도 절대 노출하지 않는다.
+    # BLOOD_PRESSURE는 수축기/이완기를 한 줄에 함께 전달한다(검증 단계에서
+    # 두 값을 모두 확인해야 하므로 LLM에도 둘 다 보여줘야 한다).
+    lines.append("[활력징후]")
+    for index, vital in enumerate(snapshot.vital_signs, start=1):
+        tag = f"V{index}"
+        tag_map[tag] = f"vital_sign:{vital.id}"
+        label = _VITAL_TYPE_LABELS.get(vital.vital_type, vital.vital_type)
+        if vital.value_secondary is not None:
+            value_text = f"{vital.value}/{vital.value_secondary}{vital.unit}"
+        else:
+            value_text = f"{vital.value}{vital.unit}"
+        lines.append(f"- [{tag}] {label}: {value_text} (측정 {vital.measured_at})")
 
     # 데이터 유형이 없으면(예: 진단 0건) 그 유형의 태그는 tag_map에도,
     # 아래 [사용 가능한 태그] 목록에도 등장하지 않는다 - 위 루프들이

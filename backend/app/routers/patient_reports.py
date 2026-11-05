@@ -14,6 +14,7 @@ from app.schemas.patient_report import (
     PatientLabTrendPointOut,
     PatientPrescriptionOut,
     PatientReportListItem,
+    PatientVitalSignOut,
 )
 from app.services.audit import write_audit_log
 from app.services.authorization import can_access_patient
@@ -159,6 +160,16 @@ def get_patient_report(
         allergies=[
             PatientAllergyOut(substance=a.substance, reaction=a.reaction, severity=a.severity)
             for a in snapshot.allergies
+        ],
+        vital_signs=[
+            PatientVitalSignOut(
+                vital_type=v.vital_type,
+                value=v.value,
+                value_secondary=v.value_secondary,
+                unit=v.unit,
+                measured_at=v.measured_at,
+            )
+            for v in snapshot.vital_signs
         ],
         evidence=build_patient_evidence(snapshot),
         safety_notice=_SAFETY_NOTICE,

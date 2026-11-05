@@ -8,6 +8,7 @@ import PatientAllergiesList from "../components/patientReport/PatientAllergiesLi
 import PatientLabResultsTable from "../components/patientReport/PatientLabResultsTable";
 import PatientLabTrendGroupView from "../components/patientReport/PatientLabTrendGroupView";
 import PatientPrescriptionsList from "../components/patientReport/PatientPrescriptionsList";
+import PatientVitalSignsList from "../components/patientReport/PatientVitalSignsList";
 import AppShell from "../components/ui/AppShell";
 import AppHeader from "../components/ui/AppHeader";
 import Navigation from "../components/ui/Navigation";
@@ -180,6 +181,12 @@ export default function PatientReportDetailPage() {
           {report.allergies.length > 0 && (
             <SectionCard title="알레르기">
               <PatientAllergiesList allergies={report.allergies} />
+            </SectionCard>
+          )}
+
+          {report.vital_signs.length > 0 && (
+            <SectionCard title="활력징후">
+              <PatientVitalSignsList vitalSigns={report.vital_signs} />
             </SectionCard>
           )}
 

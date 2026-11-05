@@ -44,6 +44,7 @@ def build_patient_evidence(snapshot: EmrSnapshot) -> list[str]:
     lab_results_by_id = {lr.id: lr for lr in snapshot.lab_results}
     prescriptions_by_id = {p.id: p for p in snapshot.prescriptions}
     allergies_by_id = {a.id: a for a in snapshot.allergies}
+    vital_signs_by_id = {v.id: v for v in snapshot.vital_signs}
 
     labels: list[str] = []
     for record_id in snapshot.source_record_ids:
@@ -92,6 +93,18 @@ def build_patient_evidence(snapshot: EmrSnapshot) -> list[str]:
                     f"{_korean_date(recorded_at.date())} 알레르기 기록"
                     if recorded_at is not None
                     else "등록된 알레르기 정보"
+                )
+        elif record_type == "vital_sign":
+            # Task F4-B: vital_type/value처럼 세부 수치가 아니라 "측정이
+            # 있었다"는 사실만 전달한다 - 같은 Encounter의 여러 VitalSign이
+            # 전부 같은 날짜·진료과로 귀결되므로 아래 dedup으로 한 문장만
+            # 남는다(의도된 동작 - 항목별로 7개씩 나열하지 않는다).
+            vital = vital_signs_by_id.get(entity_id)
+            encounter = encounters_by_id.get(vital.encounter_id) if vital else None
+            if vital is not None and encounter is not None:
+                label = (
+                    f"{_korean_date(encounter.start_time.date())} "
+                    f"{_department_label(encounter.department)} 활력징후 측정"
                 )
 
         if label is not None and label not in labels:

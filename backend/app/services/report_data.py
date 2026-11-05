@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
@@ -28,12 +29,16 @@ from app.models import (
     Patient,
     Prescription,
     SafetyAlert,
+    VitalSign,
 )
 from app.services.lab_trend_grouping import LabTrendGroup, group_lab_results_by_test
 from app.services.safety_rules import evaluate_lab_abnormal
+from app.services.vital_sign_derived import is_canonical_unit
 from app.utils.text import truncate_for_display
 
 # source_record_ids를 결정적인 순서로 만들기 위한 고정된 레코드 종류 순서.
+# Task F4-B: "vital_sign"을 끝에 추가한다 — 기존 7종의 순서·값은 바꾸지
+# 않는다(과거 보고서의 source_record_ids와 100% 동일하게 유지하기 위함).
 _SOURCE_RECORD_TYPE_ORDER = (
     "encounter",
     "diagnosis",
@@ -42,6 +47,7 @@ _SOURCE_RECORD_TYPE_ORDER = (
     "allergy",
     "safety_alert",
     "clinical_note",
+    "vital_sign",
 )
 
 
@@ -140,6 +146,20 @@ class ReportClinicalNote:
 
 
 @dataclass(frozen=True)
+class ReportVitalSign:
+    """Task F4-B 최소 필드만 담는다 — BMI/품질 경고는 여기 없다(조회
+    시점에 다시 계산하는 파생값이라 보고서 원재료에 포함하지 않는다)."""
+
+    id: int
+    encounter_id: int
+    vital_type: str
+    value: Decimal
+    value_secondary: Decimal | None
+    unit: str
+    measured_at: datetime
+
+
+@dataclass(frozen=True)
 class ReportData:
     """보고서 생성에 필요한 원재료 묶음. narrative/AiSummary/ClinicalReport
     상태·생성자·승인자·환자용 쉬운 표현·진료과별 템플릿 정보는 이 Task의
@@ -154,6 +174,7 @@ class ReportData:
     allergies: list[ReportAllergy]
     safety_alerts: list[ReportSafetyAlert]
     clinical_notes: list[ReportClinicalNote]
+    vital_signs: list[ReportVitalSign] = field(default_factory=list)
     source_record_ids: list[str] = field(default_factory=list)
 
 
@@ -165,6 +186,7 @@ def _build_source_record_ids(
     allergies: list[Allergy],
     safety_alerts: list[SafetyAlert],
     clinical_notes: list[ClinicalNote],
+    vital_signs: list[VitalSign],
 ) -> list[str]:
     ids_by_type: dict[str, list[int]] = {
         "encounter": [e.id for e in encounters],
@@ -174,6 +196,7 @@ def _build_source_record_ids(
         "allergy": [a.id for a in allergies],
         "safety_alert": [s.id for s in safety_alerts],
         "clinical_note": [n.id for n in clinical_notes],
+        "vital_sign": [v.id for v in vital_signs],
     }
     record_ids: list[str] = []
     for record_type in _SOURCE_RECORD_TYPE_ORDER:
@@ -247,6 +270,18 @@ def collect_report_data(
     )
     allergies = db.query(Allergy).filter_by(patient_id=patient_id).all()
 
+    # Task F4-B: canonical 단위를 사용하는 기록만 보고서에 포함한다 - 비표준
+    # 단위는 의사 타임라인(F4-A)에서는 품질 경고와 함께 그대로 보이지만,
+    # 보고서/LLM 입력/환자 화면에는 들어가지 않는다. measured_at 오름차순으로
+    # 정렬한다(다른 섹션처럼 DB 반환 순서에 맡기지 않는다).
+    vital_signs_raw = (
+        db.query(VitalSign).filter(VitalSign.encounter_id.in_(unique_encounter_ids)).all()
+    )
+    vital_signs_raw = [
+        v for v in vital_signs_raw if is_canonical_unit(v.vital_type, v.unit)
+    ]
+    vital_signs_raw.sort(key=lambda v: v.measured_at)
+
     lab_trends = group_lab_results_by_test(lab_results_raw)
 
     source_record_ids = _build_source_record_ids(
@@ -257,6 +292,7 @@ def collect_report_data(
         allergies=allergies,
         safety_alerts=safety_alerts,
         clinical_notes=clinical_notes,
+        vital_signs=vital_signs_raw,
     )
 
     return ReportData(
@@ -335,6 +371,18 @@ def collect_report_data(
                 source_type=n.source_type.value,
             )
             for n in clinical_notes
+        ],
+        vital_signs=[
+            ReportVitalSign(
+                id=v.id,
+                encounter_id=v.encounter_id,
+                vital_type=v.vital_type.value,
+                value=v.value,
+                value_secondary=v.value_secondary,
+                unit=v.unit,
+                measured_at=v.measured_at,
+            )
+            for v in vital_signs_raw
         ],
         source_record_ids=source_record_ids,
     )

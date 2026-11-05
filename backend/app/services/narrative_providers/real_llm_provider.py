@@ -4,6 +4,7 @@ from app.schemas.clinical_report import EmrSnapshot
 from app.schemas.narrative_provider import LlmStructuredOutput
 from app.services.narrative_providers.base import (
     MentionedMeasurement,
+    MentionedVitalSign,
     NarrativeProvider,
     NarrativeProviderError,
     NarrativeProviderResult,
@@ -91,4 +92,13 @@ class RealLLMProvider(NarrativeProvider):
             provider=_PROVIDER_NAME,
             model=self._model,
             version=_PROVIDER_VERSION,
+            mentioned_vital_signs=[
+                MentionedVitalSign(
+                    vital_type=v.vital_type,
+                    value=v.value,
+                    value_secondary=v.value_secondary,
+                    unit=v.unit,
+                )
+                for v in parsed.mentioned_vital_signs
+            ],
         )

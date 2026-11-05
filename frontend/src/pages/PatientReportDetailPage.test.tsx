@@ -38,6 +38,12 @@ const SAMPLE_DETAIL = {
   ],
   prescriptions: [{ medication_name: "Metformin", dosage: "500mg", prescribed_at: "2026-03-10T09:00:00Z" }],
   allergies: [{ substance: "Penicillin", reaction: "두드러기", severity: "MODERATE" }],
+  vital_signs: [
+    {
+      vital_type: "BLOOD_PRESSURE", value: "120.000", value_secondary: "80.000",
+      unit: "mmHg", measured_at: "2026-03-10T09:00:00Z",
+    },
+  ],
   evidence: ["2026년 3월 10일 내분비내과 HbA1c 검사"],
   safety_notice:
     "검사결과와 참고범위만으로 건강상태를 판단하지 마세요.\n자세한 의미는 담당 의료진에게 확인하세요.",
@@ -294,6 +300,37 @@ describe("PatientReportDetailPage", () => {
 
     expect(await screen.findByText(/중간/)).toBeInTheDocument();
     expect(screen.queryByText("MODERATE")).not.toBeInTheDocument();
+  });
+
+  // Task F4-B: 활력징후
+  it("shows the vital signs section with formatted blood pressure", async () => {
+    setStoredToken(makeFakeJwt("PATIENT"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_DETAIL));
+    renderAt("1");
+
+    expect(await screen.findByRole("heading", { name: "활력징후" })).toBeInTheDocument();
+    expect(screen.getByText(/120\/80\s*mmHg/)).toBeInTheDocument();
+  });
+
+  it("hides the vital signs section when there are no vital signs", async () => {
+    setStoredToken(makeFakeJwt("PATIENT"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, { ...SAMPLE_DETAIL, vital_signs: [] }));
+    renderAt("1");
+
+    await screen.findByText("의사가 승인한 설명문입니다.");
+    expect(screen.queryByRole("heading", { name: "활력징후" })).not.toBeInTheDocument();
+  });
+
+  it("never renders BMI, quality warnings, or the raw vital_type code anywhere", async () => {
+    setStoredToken(makeFakeJwt("PATIENT"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_DETAIL));
+    const { container } = renderAt("1");
+
+    await screen.findByText("의사가 승인한 설명문입니다.");
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("BLOOD_PRESSURE");
+    expect(text).not.toContain("BMI");
+    expect(text).not.toContain("quality_warnings");
   });
 
   it("never renders raw SafetyAlert-style directives (stop taking / dangerous / discontinue)", async () => {

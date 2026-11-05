@@ -1,6 +1,17 @@
+from decimal import Decimal
+
 import pytest
 
-from app.models import Encounter, Patient, Prescription, SafetyAlert, SafetyAlertPriority
+from app.models import (
+    Encounter,
+    Patient,
+    Prescription,
+    SafetyAlert,
+    SafetyAlertPriority,
+    SourceType,
+    VitalSign,
+    VitalType,
+)
 from app.services.report_data import ReportScopeError, collect_report_data
 from app.services.safety_rules import evaluate_lab_abnormal
 from scripts.seed_synthetic_data import seed
@@ -298,9 +309,10 @@ def test_source_record_ids_format(db_session):
     assert f"encounter:{first_encounter.id}" in report.source_record_ids
     for record_id in report.source_record_ids:
         prefix = record_id.split(":")[0]
+        # Task F4-B: VitalSign도 같은 결정적 "type:id" 형식을 공유한다.
         assert prefix in {
             "encounter", "diagnosis", "lab_result", "prescription",
-            "allergy", "safety_alert", "clinical_note",
+            "allergy", "safety_alert", "clinical_note", "vital_sign",
         }
 
 
@@ -373,6 +385,102 @@ def test_report_data_has_no_narrative_or_ai_summary_fields(db_session):
     assert "ai_summary" not in field_names
     assert "status" not in field_names
     assert "approved_by" not in field_names
+
+
+# ============================== Task F4-B: VitalSign 수집 ===================
+# seed()의 SYN-0001 1차 방문(2026-03-10)은 7종 VitalSign을 전부 가지고
+# 있고(BMI 계산 가능 사례), 2차 방문(2026-06-10)은 혈압 역전(품질 경고)
+# 사례 1건만 가지고 있다 — Task F4-A 멱등 seed 보강 참고.
+
+
+def test_collects_only_the_selected_encounters_vital_signs(db_session):
+    seed(db_session)
+    patient = _patient(db_session, "SYN-0001")
+    first_encounter = _encounters(db_session, patient.id)[0]
+
+    report = collect_report_data(db_session, patient.id, [first_encounter.id])
+
+    assert len(report.vital_signs) == 7
+    assert all(v.encounter_id == first_encounter.id for v in report.vital_signs)
+    assert {v.vital_type for v in report.vital_signs} == {t.value for t in VitalType}
+
+
+def test_vital_signs_excludes_data_from_unselected_encounters(db_session):
+    seed(db_session)
+    patient = _patient(db_session, "SYN-0001")
+    encounters = _encounters(db_session, patient.id)
+    second_encounter = encounters[1]
+
+    report = collect_report_data(db_session, patient.id, [second_encounter.id])
+
+    assert len(report.vital_signs) == 1
+    assert report.vital_signs[0].vital_type == VitalType.BLOOD_PRESSURE.value
+    assert report.vital_signs[0].encounter_id == second_encounter.id
+
+
+def test_vital_signs_are_sorted_by_measured_at_ascending(db_session):
+    seed(db_session)
+    patient = _patient(db_session, "SYN-0001")
+    encounters = _encounters(db_session, patient.id)
+    first_two_ids = [encounters[0].id, encounters[1].id]
+
+    report = collect_report_data(db_session, patient.id, first_two_ids)
+
+    measured_times = [v.measured_at for v in report.vital_signs]
+    assert measured_times == sorted(measured_times)
+    # 1차 방문(7건)이 모두 2차 방문(1건)보다 앞서야 한다.
+    assert report.vital_signs[-1].encounter_id == encounters[1].id
+
+
+def test_vital_signs_exclude_non_canonical_unit_records(db_session):
+    seed(db_session)
+    patient = _patient(db_session, "SYN-0001")
+    first_encounter = _encounters(db_session, patient.id)[0]
+    # BODY_WEIGHT의 canonical 단위는 "kg"다 — "lb"는 비표준 단위.
+    db_session.add(
+        VitalSign(
+            encounter_id=first_encounter.id,
+            vital_type=VitalType.BODY_WEIGHT,
+            value=Decimal("150.0"),
+            value_secondary=None,
+            unit="lb",
+            measured_at=first_encounter.start_time,
+            source_type=SourceType.PATIENT_REPORTED,
+        )
+    )
+    db_session.commit()
+
+    report = collect_report_data(db_session, patient.id, [first_encounter.id])
+
+    assert all(v.unit != "lb" for v in report.vital_signs)
+    weight_entries = [v for v in report.vital_signs if v.vital_type == VitalType.BODY_WEIGHT.value]
+    assert len(weight_entries) == 1  # seed의 canonical 65.0kg만 남는다
+    assert weight_entries[0].value == Decimal("65.0")
+
+
+def test_vital_signs_have_no_bmi_or_quality_warning_fields(db_session):
+    seed(db_session)
+    patient = _patient(db_session, "SYN-0001")
+    first_encounter = _encounters(db_session, patient.id)[0]
+
+    report = collect_report_data(db_session, patient.id, [first_encounter.id])
+
+    field_names = set(report.vital_signs[0].__dataclass_fields__.keys())
+    assert "bmi" not in field_names
+    assert "quality_warnings" not in field_names
+
+
+def test_source_record_ids_includes_vital_sign_entries(db_session):
+    seed(db_session)
+    patient = _patient(db_session, "SYN-0001")
+    first_encounter = _encounters(db_session, patient.id)[0]
+
+    report = collect_report_data(db_session, patient.id, [first_encounter.id])
+
+    vital_sign_ids = {v.id for v in report.vital_signs}
+    assert vital_sign_ids  # 7건이 있어야 한다(위 테스트에서 확인됨)
+    for vital_id in vital_sign_ids:
+        assert f"vital_sign:{vital_id}" in report.source_record_ids
 
 
 # 26. password, hashed_password, JWT, JWT_SECRET 미포함

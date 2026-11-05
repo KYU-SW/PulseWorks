@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -125,6 +126,22 @@ class SnapshotClinicalNote(BaseModel):
     source_type: str
 
 
+class SnapshotVitalSign(BaseModel):
+    """Task F4-B: 보고서 생성 시점의 VitalSign 동결. 품질 경고·BMI는
+    여기 없다 - 조회 시점에 다시 계산하는 파생값이라 Snapshot에 넣지
+    않는다(app/services/report_data.py의 ReportVitalSign과 1:1 대응)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    encounter_id: int
+    vital_type: str
+    value: Decimal
+    value_secondary: Decimal | None
+    unit: str
+    measured_at: datetime
+
+
 class EmrSnapshot(BaseModel):
     """Task 12 ReportData 전체를 미러링한 구조화 원본 스냅샷. 이 안의
     필드는 보고서 PATCH(Task 17)의 대상이 아니다 — narrative/handoff_note/
@@ -141,6 +158,10 @@ class EmrSnapshot(BaseModel):
     allergies: list[SnapshotAllergy]
     safety_alerts: list[SnapshotSafetyAlert]
     clinical_notes: list[SnapshotClinicalNote]
+    # Task F4-B: 선택적 필드(기본값 [])라 Migration이 필요 없다 - 이
+    # 필드가 없는 기존 JSON도 기본값으로 그대로 파싱된다(Task D1의
+    # narrative_source/narrative_edited_by_clinician과 같은 원칙).
+    vital_signs: list[SnapshotVitalSign] = Field(default_factory=list)
     source_record_ids: list[str]
 
 

@@ -97,6 +97,9 @@ def test_assigned_doctor_creates_draft_report_with_snapshot(db_session, override
     assert body["scope_encounter_ids"] == [encounter_id]
     assert body["content"]["emr_snapshot"]["patient"]["mrn"] == "SYN-0001"
     assert len(body["content"]["emr_snapshot"]["diagnoses"]) == 1
+    # Task F4-B: EmrSnapshot에 VitalSign이 동결된다(이 Encounter는 seed()의
+    # 7종 전부를 가진다).
+    assert len(body["content"]["emr_snapshot"]["vital_signs"]) == 7
     assert body["content"]["narrative"] is None
     assert body["reviewed_by_user_id"] is None
     assert body["supersedes_report_id"] is None

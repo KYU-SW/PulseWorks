@@ -12,6 +12,7 @@ import PrescriptionsSection from "./sections/PrescriptionsSection";
 import SafetyAlertsSection from "./sections/SafetyAlertsSection";
 import SelectedEncounterSection from "./sections/SelectedEncounterSection";
 import SourceRecordIdsSection from "./sections/SourceRecordIdsSection";
+import VitalSignsSection from "./sections/VitalSignsSection";
 
 // section id와 React 컴포넌트의 유일한 연결점. 새 진료과가 생겨도 이
 // 매핑은 그대로이고 departmentReportTemplates.ts에 설정만 추가하면
@@ -19,6 +20,7 @@ import SourceRecordIdsSection from "./sections/SourceRecordIdsSection";
 const SECTION_COMPONENTS: Record<ReportSectionId, React.ComponentType<SectionComponentProps>> = {
   patient_info: PatientInfoSection,
   selected_encounter: SelectedEncounterSection,
+  vital_signs: VitalSignsSection,
   diagnoses: DiagnosesSection,
   lab_trends: LabTrendsSection,
   lab_results: LabResultsTableSection,

@@ -10,6 +10,7 @@ handoff_note, source_record_ids, SafetyAlert, ClinicalNote는 이 파일
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel
 
@@ -64,6 +65,19 @@ class PatientAllergyOut(BaseModel):
     severity: str
 
 
+class PatientVitalSignOut(BaseModel):
+    """Task F4-B: 화이트리스트 방식 — vital_type/value/value_secondary/unit/
+    measured_at만 노출한다. 품질 경고(quality_warnings), BMI, V Evidence
+    Tag, source_record_id, 내부 DB id는 이 클래스 어디에도 필드로 존재하지
+    않는다."""
+
+    vital_type: str
+    value: Decimal
+    value_secondary: Decimal | None
+    unit: str
+    measured_at: datetime
+
+
 class PatientClinicalReportDetail(BaseModel):
     id: int
     department: str
@@ -79,5 +93,6 @@ class PatientClinicalReportDetail(BaseModel):
     lab_trends: list[PatientLabTrendGroupOut]
     prescriptions: list[PatientPrescriptionOut]
     allergies: list[PatientAllergyOut]
+    vital_signs: list[PatientVitalSignOut]
     evidence: list[str]
     safety_notice: str

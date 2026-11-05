@@ -1,5 +1,9 @@
 from app.schemas.clinical_report import EmrSnapshot
-from app.services.narrative_providers.base import MentionedMeasurement, NarrativeProviderResult
+from app.services.narrative_providers.base import (
+    MentionedMeasurement,
+    MentionedVitalSign,
+    NarrativeProviderResult,
+)
 from app.services.narrative_validation import (
     MAX_NARRATIVE_LENGTH,
     validate_narrative_provider_result,
@@ -37,6 +41,27 @@ def _snapshot(**overrides) -> EmrSnapshot:
     }
     base.update(overrides)
     return EmrSnapshot.model_validate(base)
+
+
+def _snapshot_with_vitals(**overrides) -> EmrSnapshot:
+    # Task F4-B: _snapshot()에 VitalSign 2건(혈압 + 체온)을 추가한다.
+    base_overrides = dict(
+        vital_signs=[
+            {
+                "id": 21, "encounter_id": 1, "vital_type": "BLOOD_PRESSURE",
+                "value": "120", "value_secondary": "80", "unit": "mmHg",
+                "measured_at": "2026-03-10T09:00:00Z",
+            },
+            {
+                "id": 22, "encounter_id": 1, "vital_type": "BODY_TEMPERATURE",
+                "value": "36.5", "value_secondary": None, "unit": "Cel",
+                "measured_at": "2026-03-10T09:05:00Z",
+            },
+        ],
+        source_record_ids=["encounter:1", "lab_result:1", "lab_result:2", "vital_sign:21", "vital_sign:22"],
+    )
+    base_overrides.update(overrides)
+    return _snapshot(**base_overrides)
 
 
 def _llm_result(**overrides) -> NarrativeProviderResult:
@@ -144,6 +169,14 @@ class TestLlmResultValidation:
         validation = validate_narrative_provider_result(result, _snapshot())
         assert validation.ok is True
 
+    def test_vital_signs_alone_are_enough_evidence(self):
+        result = _llm_result(
+            cited_record_ids=[], mentioned_measurements=[],
+            mentioned_vital_signs=[MentionedVitalSign("BODY_TEMPERATURE", 36.5, None, "Cel")],
+        )
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is True
+
     def test_never_mutates_the_input_snapshot(self):
         snapshot = _snapshot()
         before = snapshot.model_dump(mode="json")
@@ -243,6 +276,126 @@ class TestEvidenceTagLeakDetection:
     def test_allows_a_generic_alphanumeric_combination(self):
         result = _llm_result(narrative="검사 항목 코드 A1B2와 관련된 기록입니다.")
         validation = validate_narrative_provider_result(result, _snapshot())
+        assert validation.ok is True
+
+
+class TestVitalSignEvidenceTagLeakDetection:
+    # --- 차단해야 하는 표현 -------------------------------------------------
+
+    def test_rejects_square_bracket_v_tag(self):
+        result = _llm_result(narrative="혈압 기록이 있습니다 [V1].")
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_parenthesis_v_tag(self):
+        result = _llm_result(narrative="혈압 기록이 있습니다 (V1).")
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_curly_brace_v_tag(self):
+        result = _llm_result(narrative="혈압 기록이 있습니다 {V1}.")
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    def test_rejects_geungeo_cue_word_with_v_tag(self):
+        result = _llm_result(narrative="이 설명은 근거 V1을 바탕으로 합니다.")
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is False
+        assert validation.reason == "evidence_tag_leaked_into_narrative"
+
+    # --- 정상적으로 허용해야 하는 표현(V1 bare-word) --------------------------
+    # V1은 ECG 흉부 리드(심장내과), 삼차신경 제1분지(해부학), 소프트웨어
+    # 버전 표기와 실제로 혼동될 수 있어 - L1과 같은 이유로 - 구분자·단서어
+    # 없이 홀로 등장하면 의도적으로 차단하지 않는다.
+
+    def test_allows_v1_as_an_ecg_lead_reference_without_delimiter(self):
+        result = _llm_result(narrative="V1 리드에서 특이 소견은 없습니다.")
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is True
+
+    def test_allows_bare_v1_without_delimiter_or_cue_word(self):
+        result = _llm_result(narrative="V1 수치가 기록되어 있습니다.")
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is True
+
+
+class TestVitalSignMeasurementValidation:
+    def test_a_real_vital_sign_measurement_passes(self):
+        result = _llm_result(
+            mentioned_vital_signs=[MentionedVitalSign("BODY_TEMPERATURE", 36.5, None, "Cel")]
+        )
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is True
+
+    def test_a_different_vital_sign_value_is_rejected(self):
+        result = _llm_result(
+            mentioned_vital_signs=[MentionedVitalSign("BODY_TEMPERATURE", 38.0, None, "Cel")]
+        )
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is False
+        assert validation.reason == "measurement_not_in_snapshot"
+
+    def test_a_different_vital_sign_unit_is_rejected(self):
+        result = _llm_result(
+            mentioned_vital_signs=[MentionedVitalSign("BODY_TEMPERATURE", 36.5, None, "degF")]
+        )
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is False
+        assert validation.reason == "measurement_not_in_snapshot"
+
+    def test_blood_pressure_with_both_components_matching_passes(self):
+        result = _llm_result(
+            mentioned_vital_signs=[MentionedVitalSign("BLOOD_PRESSURE", 120, 80, "mmHg")]
+        )
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is True
+
+    def test_blood_pressure_with_mismatched_systolic_is_rejected(self):
+        result = _llm_result(
+            mentioned_vital_signs=[MentionedVitalSign("BLOOD_PRESSURE", 130, 80, "mmHg")]
+        )
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is False
+        assert validation.reason == "measurement_not_in_snapshot"
+
+    def test_blood_pressure_with_mismatched_diastolic_is_rejected(self):
+        result = _llm_result(
+            mentioned_vital_signs=[MentionedVitalSign("BLOOD_PRESSURE", 120, 90, "mmHg")]
+        )
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is False
+        assert validation.reason == "measurement_not_in_snapshot"
+
+    def test_blood_pressure_missing_the_secondary_value_is_rejected(self):
+        # 혈압은 두 component가 모두 일치해야 한다 - 이완기 값을 통째로
+        # 빠뜨린 자기 보고도 거부한다.
+        result = _llm_result(
+            mentioned_vital_signs=[MentionedVitalSign("BLOOD_PRESSURE", 120, None, "mmHg")]
+        )
+        validation = validate_narrative_provider_result(result, _snapshot_with_vitals())
+        assert validation.ok is False
+        assert validation.reason == "measurement_not_in_snapshot"
+
+    def test_an_extreme_but_real_vital_sign_value_is_not_rejected_for_being_abnormal(self):
+        # 혈압 역전(수축기<이완기)처럼 임상적으로 비정상적인 값이라도,
+        # Snapshot에 실제로 그렇게 저장되어 있다면 "이상값이라서" 거부하지
+        # 않는다 - F4-A의 품질경고 설계 원칙과 동일하게 Validator는 사실
+        # 보존만 확인한다.
+        snapshot = _snapshot_with_vitals(
+            vital_signs=[
+                {
+                    "id": 23, "encounter_id": 1, "vital_type": "BLOOD_PRESSURE",
+                    "value": "80", "value_secondary": "120", "unit": "mmHg",
+                    "measured_at": "2026-06-10T09:00:00Z",
+                },
+            ],
+            source_record_ids=["encounter:1", "lab_result:1", "lab_result:2", "vital_sign:23"],
+        )
+        result = _llm_result(mentioned_vital_signs=[MentionedVitalSign("BLOOD_PRESSURE", 80, 120, "mmHg")])
+        validation = validate_narrative_provider_result(result, snapshot)
         assert validation.ok is True
 
 

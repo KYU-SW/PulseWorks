@@ -98,6 +98,19 @@ export type SnapshotClinicalNote = {
   source_type: string;
 };
 
+// Task F4-B: value/value_secondary는 Decimal을 그대로 직렬화한 문자열이다
+// (정밀도 보존 — Task F4-A와 동일한 계약). value_secondary는
+// BLOOD_PRESSURE의 이완기 값에만 쓰이고 그 외 6종은 항상 null이다.
+export type SnapshotVitalSign = {
+  id: number;
+  encounter_id: number;
+  vital_type: string;
+  value: string;
+  value_secondary: string | null;
+  unit: string;
+  measured_at: string;
+};
+
 export type EmrSnapshot = {
   patient: SnapshotPatient;
   encounters: SnapshotEncounter[];
@@ -108,6 +121,7 @@ export type EmrSnapshot = {
   allergies: SnapshotAllergy[];
   safety_alerts: SnapshotSafetyAlert[];
   clinical_notes: SnapshotClinicalNote[];
+  vital_signs: SnapshotVitalSign[];
   source_record_ids: string[];
 };
 

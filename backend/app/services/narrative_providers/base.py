@@ -10,7 +10,7 @@ DeterministicMockProvider(mock_provider.py)뿐이다. 실제 LLM은 아직
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.schemas.clinical_report import EmrSnapshot
 
@@ -19,6 +19,19 @@ from app.schemas.clinical_report import EmrSnapshot
 class MentionedMeasurement:
     test_name: str
     value: float
+    unit: str
+
+
+@dataclass(frozen=True)
+class MentionedVitalSign:
+    """Task F4-B: MentionedMeasurement와 같은 역할(LLM이 narrative에서
+    실제로 언급한 값을 자기 보고하게 해 결정적으로 검증하는 용도)을
+    VitalSign에 대해 담당한다. value_secondary는 BLOOD_PRESSURE의
+    이완기 값에만 쓰이고, 그 외 6종은 항상 None이다."""
+
+    vital_type: str
+    value: float
+    value_secondary: float | None
     unit: str
 
 
@@ -33,6 +46,9 @@ class NarrativeProviderResult:
     provider: str
     model: str
     version: str
+    # Task F4-B: 기본값이 있어야 기존 호출부(테스트 포함)가 이 필드를
+    # 몰라도 그대로 동작한다.
+    mentioned_vital_signs: list[MentionedVitalSign] = field(default_factory=list)
 
 
 class NarrativeProviderError(Exception):

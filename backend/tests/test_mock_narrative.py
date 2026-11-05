@@ -386,6 +386,184 @@ def test_empty_snapshot_returns_a_no_records_and_safety_notice_only_narrative():
     assert "알레르기 정보가 등록되어 있습니다" not in result.summary_text
 
 
+# --- Task F4-B: 활력징후 문단 -------------------------------------------
+
+_VITAL_SIGNS_ALL_SEVEN = [
+    {
+        "id": 1, "encounter_id": 1, "vital_type": "BLOOD_PRESSURE",
+        "value": "120", "value_secondary": "80", "unit": "mmHg",
+        "measured_at": "2026-03-10T09:00:00Z",
+    },
+    {
+        "id": 2, "encounter_id": 1, "vital_type": "BODY_HEIGHT",
+        "value": "170.0", "value_secondary": None, "unit": "cm",
+        "measured_at": "2026-03-10T09:00:00Z",
+    },
+    {
+        "id": 3, "encounter_id": 1, "vital_type": "BODY_WEIGHT",
+        "value": "65.0", "value_secondary": None, "unit": "kg",
+        "measured_at": "2026-03-10T09:00:00Z",
+    },
+    {
+        "id": 4, "encounter_id": 1, "vital_type": "BODY_TEMPERATURE",
+        "value": "36.5", "value_secondary": None, "unit": "Cel",
+        "measured_at": "2026-03-10T09:00:00Z",
+    },
+    {
+        "id": 5, "encounter_id": 1, "vital_type": "HEART_RATE",
+        "value": "72", "value_secondary": None, "unit": "/min",
+        "measured_at": "2026-03-10T09:00:00Z",
+    },
+    {
+        "id": 6, "encounter_id": 1, "vital_type": "RESPIRATORY_RATE",
+        "value": "16", "value_secondary": None, "unit": "/min",
+        "measured_at": "2026-03-10T09:00:00Z",
+    },
+    {
+        "id": 7, "encounter_id": 1, "vital_type": "PULSE_OXIMETRY",
+        "value": "98", "value_secondary": None, "unit": "%",
+        "measured_at": "2026-03-10T09:00:00Z",
+    },
+]
+
+
+# 1. VitalSign이 없는 Snapshot은 기존 narrative와 동일
+def test_narrative_unchanged_when_there_are_no_vital_signs():
+    with_default = generate_mock_report_narrative(_snapshot())
+    with_explicit_empty = generate_mock_report_narrative(_snapshot(vital_signs=[]))
+    assert with_default.summary_text == with_explicit_empty.summary_text
+
+
+# 2. VitalSign이 있으면 핵심 활력징후 문단 추가
+def test_vital_sign_paragraph_is_added_when_vital_signs_exist():
+    result = generate_mock_report_narrative(_snapshot(vital_signs=_VITAL_SIGNS_ALL_SEVEN))
+    assert "혈압은 120/80 mmHg" in result.summary_text
+    assert "체온은 36.5℃" in result.summary_text
+    assert "맥박은 72회/분" in result.summary_text
+    assert "호흡수는 16회/분" in result.summary_text
+    assert "산소포화도는 98%로 기록되어 있습니다" in result.summary_text
+
+
+# 3. 혈압 두 component가 올바르게 표시
+def test_blood_pressure_shows_both_systolic_and_diastolic():
+    result = generate_mock_report_narrative(_snapshot(vital_signs=_VITAL_SIGNS_ALL_SEVEN))
+    assert "120/80 mmHg" in result.summary_text
+
+
+# 4. 체온 Cel이 ℃로 표시
+def test_body_temperature_displays_celsius_symbol_not_canonical_code():
+    result = generate_mock_report_narrative(_snapshot(vital_signs=_VITAL_SIGNS_ALL_SEVEN))
+    assert "36.5℃" in result.summary_text
+    assert "Cel" not in result.summary_text
+
+
+# 5. 심박수와 호흡수가 회/분으로 표시
+def test_heart_rate_and_respiratory_rate_display_as_hoe_bun():
+    result = generate_mock_report_narrative(_snapshot(vital_signs=_VITAL_SIGNS_ALL_SEVEN))
+    assert "72회/분" in result.summary_text
+    assert "16회/분" in result.summary_text
+    assert "/min" not in result.summary_text
+
+
+# 6. 산소포화도가 %로 표시
+def test_pulse_oximetry_displays_percent_sign():
+    result = generate_mock_report_narrative(_snapshot(vital_signs=_VITAL_SIGNS_ALL_SEVEN))
+    assert "98%" in result.summary_text
+
+
+# 7. 키·체중 수치가 narrative에 중복 나열되지 않음
+def test_height_and_weight_values_are_not_repeated_in_the_narrative():
+    result = generate_mock_report_narrative(_snapshot(vital_signs=_VITAL_SIGNS_ALL_SEVEN))
+    assert "170" not in result.summary_text
+    assert "65.0" not in result.summary_text
+    assert (
+        "키와 체중을 포함한 자세한 내용은 아래 활력징후 항목에서 확인할 수 있습니다."
+        in result.summary_text
+    )
+
+
+# 8. BMI 미포함
+def test_vital_sign_paragraph_never_mentions_bmi():
+    result = generate_mock_report_narrative(_snapshot(vital_signs=_VITAL_SIGNS_ALL_SEVEN))
+    assert "BMI" not in result.summary_text
+
+
+# 9. 품질 경고 미포함 (혈압 역전처럼 품질 경고 대상이 되는 값이라도 중립적으로만 서술)
+def test_vital_sign_paragraph_never_mentions_quality_warnings_even_for_reversed_blood_pressure():
+    reversed_bp = [
+        {
+            "id": 1, "encounter_id": 1, "vital_type": "BLOOD_PRESSURE",
+            "value": "80", "value_secondary": "120", "unit": "mmHg",
+            "measured_at": "2026-06-10T09:00:00Z",
+        },
+    ]
+    result = generate_mock_report_narrative(_snapshot(vital_signs=reversed_bp))
+    assert "80/120 mmHg" in result.summary_text
+    assert "경고" not in result.summary_text
+    assert "품질" not in result.summary_text
+    assert "역전" not in result.summary_text
+
+
+# 10. V Evidence Tag 미노출
+def test_vital_sign_paragraph_never_exposes_a_v_tag():
+    result = generate_mock_report_narrative(_snapshot(vital_signs=_VITAL_SIGNS_ALL_SEVEN))
+    assert "V1" not in result.summary_text
+    assert "[V1]" not in result.summary_text
+
+
+# 11. source_record_id 미노출
+def test_vital_sign_paragraph_never_exposes_a_raw_source_record_id():
+    result = generate_mock_report_narrative(_snapshot(vital_signs=_VITAL_SIGNS_ALL_SEVEN))
+    assert "vital_sign:1" not in result.summary_text
+    assert "vital_sign:" not in result.summary_text
+
+
+# 12. 진단·치료·위험도 표현 미포함
+def test_vital_sign_paragraph_never_contains_banned_recommendation_phrases():
+    result = generate_mock_report_narrative(_snapshot(vital_signs=_VITAL_SIGNS_ALL_SEVEN))
+    for banned in _BANNED_PHRASES:
+        assert banned not in result.summary_text
+    for diagnostic_word in ["고혈압", "저혈압", "저산소증", "응급", "위험도"]:
+        assert diagnostic_word not in result.summary_text
+
+
+# 활력징후만 있고 핵심 5종이 전부 없는 경우(키·체중만 있는 경우)에도
+# 안내 문구는 그대로 추가된다.
+def test_guidance_sentence_still_appears_when_only_height_and_weight_exist():
+    only_height_weight = [
+        {
+            "id": 1, "encounter_id": 1, "vital_type": "BODY_HEIGHT",
+            "value": "170.0", "value_secondary": None, "unit": "cm",
+            "measured_at": "2026-03-10T09:00:00Z",
+        },
+    ]
+    result = generate_mock_report_narrative(_snapshot(vital_signs=only_height_weight))
+    assert (
+        "키와 체중을 포함한 자세한 내용은 아래 활력징후 항목에서 확인할 수 있습니다."
+        in result.summary_text
+    )
+    assert "170" not in result.summary_text
+
+
+# 같은 유형이 둘 이상이면(정상적으로는 드문 상황) 가장 최근 측정값을 쓴다.
+def test_duplicate_vital_type_uses_the_most_recent_measurement():
+    duplicated = [
+        {
+            "id": 1, "encounter_id": 1, "vital_type": "HEART_RATE",
+            "value": "60", "value_secondary": None, "unit": "/min",
+            "measured_at": "2026-03-10T08:00:00Z",
+        },
+        {
+            "id": 2, "encounter_id": 1, "vital_type": "HEART_RATE",
+            "value": "72", "value_secondary": None, "unit": "/min",
+            "measured_at": "2026-03-10T09:00:00Z",
+        },
+    ]
+    result = generate_mock_report_narrative(_snapshot(vital_signs=duplicated))
+    assert "72회/분" in result.summary_text
+    assert "60회/분" not in result.summary_text
+
+
 def test_snapshot_with_only_safety_alert_and_clinical_note_still_falls_back_to_no_records():
     # 진단/검사/처방/알레르기가 전부 없고 SafetyAlert/ClinicalNote만 있어도,
     # 그 둘은 narrative에서 절대 쓰이지 않으므로 "기록 없음"으로 처리된다.
