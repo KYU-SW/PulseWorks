@@ -361,6 +361,11 @@ export default function ClinicalReportPreviewPage() {
   // 생성 요청을 취소하고, 이후 그 요청의 결과가 와도 이미 사라진
   // 컴포넌트의 상태를 바꾸지 않도록 한다.
   useEffect(() => {
+    // StrictMode(개발 모드)는 이 effect를 mount→cleanup→mount 순으로 한 번
+    // 더 실행한다 — 그 첫 번째 cleanup이 아래에서 isMountedRef.current를
+    // false로 만들므로, 여기서 다시 true로 되돌리지 않으면 "진짜" mount
+    // 이후에도 영구히 false로 남아 생성 성공/실패 응답이 전부 무시된다.
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       if (narrativeAbortControllerRef.current) {

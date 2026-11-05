@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "../auth/AuthContext";
@@ -108,8 +109,8 @@ function mockFetchRouter(routes: { get: unknown; post?: unknown; postStatus?: nu
   });
 }
 
-function renderPreviewPage(reportId = "42") {
-  return render(
+function renderPreviewPage(reportId = "42", options: { strict?: boolean } = {}) {
+  const tree = (
     <AuthProvider>
       <MemoryRouter initialEntries={[`/doctor/reports/${reportId}`]}>
         <Routes>
@@ -128,6 +129,11 @@ function renderPreviewPage(reportId = "42") {
       </MemoryRouter>
     </AuthProvider>
   );
+  // StrictMode(개발 모드에서 실제로 쓰이는 모드, main.tsx 참고)는 각
+  // effect를 mount→cleanup→mount 순으로 한 번 더 실행해 cleanup
+  // 누락·오용 버그를 드러낸다. 아래 버그 재현 테스트들은 이 옵션으로
+  // 그 환경을 그대로 흉내낸다.
+  return render(options.strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 describe("ClinicalReportPreviewPage", () => {
@@ -1273,5 +1279,110 @@ describe("ClinicalReportPreviewPage", () => {
       (call: any[]) => (call[1] as RequestInit)?.method === "POST"
     );
     expect(postCalls).toHaveLength(2);
+  });
+
+  // ===== 버그 수정: StrictMode(실제 개발 모드)에서 생성 성공/실패/timeout이
+  // 화면에 반영되지 않고 "생성 중..."에 멈추는 결함 재현 =====
+  //
+  // 실제 원인: isMountedRef가 StrictMode의 mount→cleanup→mount 이중 실행
+  // 중 cleanup에서 false가 된 뒤, 그 다음 "진짜" mount에서 다시 true로
+  // 되돌려지지 않아 영구히 false로 남는다. handleGenerateNarrative의 성공/
+  // 실패/finally 분기가 모두 이 플래그를 확인하므로, 실제 응답이 와도
+  // 전부 무시된다.
+
+  it("[StrictMode] updates the textarea and re-enables the button after a successful generation, without a page reload", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const generatedReport = {
+      ...SAMPLE_REPORT,
+      content: {
+        ...SAMPLE_REPORT.content,
+        narrative: "생성된 설명문 초안입니다.",
+        narrative_source: "mock",
+      },
+    };
+    const fetchMock = mockFetchRouter({ get: SAMPLE_REPORT, post: generatedReport });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage("42", { strict: true });
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
+    await user.click(button);
+
+    await screen.findByDisplayValue("생성된 설명문 초안입니다.");
+    expect(
+      screen.queryByRole("button", { name: "설명문 초안 생성 중..." })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("설명문 초안이 생성되었습니다. 내용을 검토한 뒤 저장하거나 승인하세요.")
+    ).toBeInTheDocument();
+
+    const postCalls = fetchMock.mock.calls.filter(
+      (call: any[]) => (call[1] as RequestInit)?.method === "POST"
+    );
+    expect(postCalls).toHaveLength(1);
+  });
+
+  it("[StrictMode] clears the loading state and shows an error after a failed generation", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = mockFetchRouter({ get: SAMPLE_REPORT, post: { detail: "boom" }, postStatus: 500 });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage("42", { strict: true });
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
+    await user.click(button);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("설명문을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    expect(screen.getByRole("button", { name: "설명문 초안 생성" })).not.toBeDisabled();
+  });
+
+  it("[StrictMode] aborts and shows the timeout notice once 75 seconds elapse, then re-enables the button", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const { fetchMock, getLastSignal } = mockFetchRouterControllablePost(SAMPLE_REPORT);
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage("42", { strict: true });
+
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
+
+    vi.useFakeTimers();
+    fireEvent.click(button);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(75000);
+    });
+
+    expect(getLastSignal()!.aborted).toBe(true);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(TIMEOUT_NARRATIVE_ERROR);
+    const retryButton = screen.getByRole("button", { name: "설명문 초안 생성" });
+    expect(retryButton).not.toBeDisabled();
+  });
+
+  it("[StrictMode] still aborts the active request and clears its timeout on a real unmount, without updating state", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const { fetchMock, getLastSignal, resolvePost } = mockFetchRouterControllablePost(SAMPLE_REPORT);
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = renderPreviewPage("42", { strict: true });
+
+    const button = await screen.findByRole("button", { name: "설명문 초안 생성" });
+    fireEvent.click(button);
+
+    expect(getLastSignal()).toBeDefined();
+    expect(getLastSignal()!.aborted).toBe(false);
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    unmount();
+    expect(getLastSignal()!.aborted).toBe(true);
+
+    resolvePost({
+      ok: true, status: 200, json: async () => SAMPLE_REPORT, text: async () => JSON.stringify(SAMPLE_REPORT),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
   });
 });
