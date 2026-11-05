@@ -288,6 +288,10 @@ def test_detail_never_exposes_internal_fields_anywhere(db_session, override_get_
         "safety_alerts", "clinical_notes", "preview_text", "prescribed_by_user_id",
         # Task D1: narrative 출처 메타데이터는 의사 화면 전용이다.
         "narrative_source", "narrative_edited_by_clinician", "provider", "vendor", "model",
+        # Task F4-A: 이 Encounter에 실제로 VitalSign·BMI가 있는데도(위에서
+        # seed된 7종 + BMI 계산 가능 사례) 환자 화면에는 전혀 노출되지
+        # 않아야 한다 — EmrSnapshot 자체에 아직 연결되지 않았기 때문이다.
+        "vital_type", "vital_signs", "value_secondary", "quality_warnings", "bmi",
     ]:
         assert f'"{forbidden_key}"' not in raw_text
 

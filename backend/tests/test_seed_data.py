@@ -15,6 +15,8 @@ from app.models import (
     Role,
     SourceType,
     User,
+    VitalSign,
+    VitalType,
 )
 from scripts.seed_synthetic_data import seed
 
@@ -296,6 +298,7 @@ def test_running_seed_twice_does_not_duplicate_records(db_session):
         "prescriptions": db_session.query(Prescription).count(),
         "notes": db_session.query(ClinicalNote).count(),
         "allergies": db_session.query(Allergy).count(),
+        "vital_signs": db_session.query(VitalSign).count(),  # Task F4-A
     }
     assert all(v > 0 for v in counts_after_first_run.values())
 
@@ -312,9 +315,86 @@ def test_running_seed_twice_does_not_duplicate_records(db_session):
         "prescriptions": db_session.query(Prescription).count(),
         "notes": db_session.query(ClinicalNote).count(),
         "allergies": db_session.query(Allergy).count(),
+        "vital_signs": db_session.query(VitalSign).count(),  # Task F4-A
     }
 
     assert counts_after_second_run == counts_after_first_run
+
+
+# Task F4-A(seed 멱등성 보완): VitalSign은 Patient/Encounter 생성 가드와
+# 분리돼 있다 — 이 테스트는 그 분리가 실제로 "이미 Patient/Encounter가
+# 있어도 VitalSign만 추가된다"를 검증한다. seed()를 한 번 호출해 모든
+# 레코드가 만들어진 상태를 재현한 뒤, VitalSign 행만 전부 지우고
+# (Patient/Encounter/Diagnosis 등은 그대로 둔 채) 다시 seed()를 호출해도
+# VitalSign이 다시 채워지는지 — 그리고 세 번째 호출에서는 더 늘지
+# 않는지 — 확인한다.
+def test_vital_signs_are_added_even_when_patient_and_encounter_already_exist(db_session):
+    seed(db_session)
+    assert db_session.query(VitalSign).count() > 0
+
+    db_session.query(VitalSign).delete()
+    db_session.commit()
+    assert db_session.query(VitalSign).count() == 0
+
+    patients_before = db_session.query(Patient).count()
+    encounters_before = db_session.query(Encounter).count()
+
+    seed(db_session)  # endo_created=False now — Patient/Encounter는 재사용됨
+
+    assert db_session.query(Patient).count() == patients_before
+    assert db_session.query(Encounter).count() == encounters_before
+    vital_signs_after_refill = db_session.query(VitalSign).count()
+    assert vital_signs_after_refill == 8  # 3월 7종 + 6월 1종
+
+    seed(db_session)  # 세 번째 호출 — 더 늘지 않아야 한다
+    assert db_session.query(VitalSign).count() == vital_signs_after_refill
+
+
+def test_vital_sign_uniqueness_is_by_encounter_type_and_measured_at(db_session):
+    """같은 (encounter_id, vital_type, measured_at) 조합은 두 번 이상
+    생기지 않는다 — seed를 여러 번 호출해도 그 조합별로 정확히 1건씩만
+    있어야 한다."""
+    seed(db_session)
+    seed(db_session)
+
+    rows = db_session.query(VitalSign).all()
+    seen = set()
+    for row in rows:
+        key = (row.encounter_id, row.vital_type, row.measured_at)
+        assert key not in seen
+        seen.add(key)
+
+
+def test_endocrinology_vital_signs_cover_expected_types_and_values(db_session):
+    seed(db_session)
+
+    endo_patient = db_session.query(Patient).filter_by(mrn="SYN-0001").first()
+    encounters = (
+        db_session.query(Encounter)
+        .filter_by(patient_id=endo_patient.id, department=Department.ENDOCRINOLOGY)
+        .all()
+    )
+
+    march_encounter = next(e for e in encounters if e.start_time.month == 3)
+    june_encounter = next(e for e in encounters if e.start_time.month == 6)
+
+    march_vitals = db_session.query(VitalSign).filter_by(encounter_id=march_encounter.id).all()
+    june_vitals = db_session.query(VitalSign).filter_by(encounter_id=june_encounter.id).all()
+
+    assert {v.vital_type for v in march_vitals} == {
+        VitalType.BLOOD_PRESSURE, VitalType.BODY_HEIGHT, VitalType.BODY_WEIGHT,
+        VitalType.BODY_TEMPERATURE, VitalType.HEART_RATE, VitalType.RESPIRATORY_RATE,
+        VitalType.PULSE_OXIMETRY,
+    }
+    assert {v.vital_type for v in june_vitals} == {VitalType.BLOOD_PRESSURE}
+
+    march_bp = next(v for v in march_vitals if v.vital_type == VitalType.BLOOD_PRESSURE)
+    assert march_bp.value == 120
+    assert march_bp.value_secondary == 80
+
+    june_bp = june_vitals[0]
+    assert june_bp.value == 80  # 혈압 역전 사례(수축기<이완기)
+    assert june_bp.value_secondary == 120
 
 
 # 15. 실제 환자정보(주민등록번호 형태 등)로 의심되는 데이터가 없는지

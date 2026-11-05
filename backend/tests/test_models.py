@@ -1,14 +1,16 @@
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from app.models.enums import Department, Role, SourceType, SafetyAlertPriority
+from app.models.enums import Department, Role, SourceType, SafetyAlertPriority, VitalType
 from app.models.user import User
 from app.models.patient import Patient
 from app.models.encounter import Encounter, EncounterType
 from app.models.clinical import Diagnosis
 from app.models.safety_alert import SafetyAlert
+from app.models.vital_sign import VitalSign
 
 
 def test_create_patient_encounter_and_user(db_session):
@@ -122,6 +124,97 @@ def test_safety_alert_requires_at_least_one_evidence_link(db_session):
         created_at=datetime(2026, 1, 5, 10, 0, tzinfo=timezone.utc),
     )
     db_session.add(alert)
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
+
+
+# Task F4-A: VitalSign 모델
+
+
+def test_create_vital_sign(db_session):
+    _, _, encounter = _make_patient_and_encounter(db_session)
+
+    vital = VitalSign(
+        encounter_id=encounter.id,
+        vital_type=VitalType.HEART_RATE,
+        value=Decimal("72"),
+        value_secondary=None,
+        unit="/min",
+        measured_at=datetime(2026, 1, 5, 9, 30, tzinfo=timezone.utc),
+        source_type=SourceType.INSTITUTION_GENERATED,
+    )
+    db_session.add(vital)
+    db_session.commit()
+    db_session.refresh(vital)
+
+    assert vital.id is not None
+    assert vital.encounter_id == encounter.id
+    assert vital.value_secondary is None
+    assert vital.created_at is not None
+    assert vital.updated_at is not None
+
+
+def test_vital_sign_value_preserves_decimal_precision(db_session):
+    """value/value_secondary는 Numeric(10,3) — float 왕복 과정에서 생길 수
+    있는 이진 오차 없이 Decimal이 그대로 보존돼야 한다."""
+    _, _, encounter = _make_patient_and_encounter(db_session)
+
+    vital = VitalSign(
+        encounter_id=encounter.id,
+        vital_type=VitalType.BODY_TEMPERATURE,
+        value=Decimal("36.500"),
+        value_secondary=None,
+        unit="Cel",
+        measured_at=datetime(2026, 1, 5, 9, 30, tzinfo=timezone.utc),
+        source_type=SourceType.INSTITUTION_GENERATED,
+    )
+    db_session.add(vital)
+    db_session.commit()
+    db_session.refresh(vital)
+
+    assert vital.value == Decimal("36.500")
+    assert isinstance(vital.value, Decimal)
+
+
+def test_vital_sign_blood_pressure_stores_both_components(db_session):
+    _, _, encounter = _make_patient_and_encounter(db_session)
+
+    vital = VitalSign(
+        encounter_id=encounter.id,
+        vital_type=VitalType.BLOOD_PRESSURE,
+        value=Decimal("120"),
+        value_secondary=Decimal("80"),
+        unit="mmHg",
+        measured_at=datetime(2026, 1, 5, 9, 30, tzinfo=timezone.utc),
+        source_type=SourceType.INSTITUTION_GENERATED,
+    )
+    db_session.add(vital)
+    db_session.commit()
+    db_session.refresh(vital)
+
+    assert vital.value == Decimal("120")
+    assert vital.value_secondary == Decimal("80")
+
+
+def test_deleting_encounter_with_vital_sign_is_restricted(db_session):
+    """Encounter를 삭제하면 그 밑의 VitalSign이 고아가 되지 않도록
+    ON DELETE RESTRICT로 막는다(LabResult/Diagnosis와 동일한 정책)."""
+    _, _, encounter = _make_patient_and_encounter(db_session)
+
+    vital = VitalSign(
+        encounter_id=encounter.id,
+        vital_type=VitalType.HEART_RATE,
+        value=Decimal("72"),
+        value_secondary=None,
+        unit="/min",
+        measured_at=datetime(2026, 1, 5, 9, 30, tzinfo=timezone.utc),
+        source_type=SourceType.INSTITUTION_GENERATED,
+    )
+    db_session.add(vital)
+    db_session.commit()
+
+    db_session.delete(encounter)
     with pytest.raises(IntegrityError):
         db_session.commit()
     db_session.rollback()

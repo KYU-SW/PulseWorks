@@ -63,3 +63,17 @@ class ClinicalReportStatus(str, enum.Enum):
     DRAFT = "DRAFT"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+
+
+# Task F4-A: KR Core IG v1.0.2(STU1)가 공식 Profile로 확인한 7종만 허용한다
+# (docs/standards/kr-cdi-kr-core-mapping.md 참고). BMI는 그 7종에 없는
+# 계산값이라 별도 VitalType으로 추가하지 않는다 — Backend 공통 서비스가
+# 그때그때 계산만 하고 저장하지 않는다(app/services/vital_sign_derived.py).
+class VitalType(str, enum.Enum):
+    BLOOD_PRESSURE = "BLOOD_PRESSURE"
+    BODY_HEIGHT = "BODY_HEIGHT"
+    BODY_WEIGHT = "BODY_WEIGHT"
+    BODY_TEMPERATURE = "BODY_TEMPERATURE"
+    HEART_RATE = "HEART_RATE"
+    RESPIRATORY_RATE = "RESPIRATORY_RATE"
+    PULSE_OXIMETRY = "PULSE_OXIMETRY"

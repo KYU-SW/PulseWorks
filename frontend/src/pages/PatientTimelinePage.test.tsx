@@ -425,4 +425,111 @@ describe("PatientTimelinePage", () => {
     expect(String(postCall![0])).toContain("/patients/7/reports");
     expect(String(postCall![0])).not.toContain("/patients/1/reports");
   });
+
+  // ======================= Task F4-A: VitalSign =======================
+
+  const TIMELINE_WITH_VITAL_SIGNS = {
+    patient: SAMPLE_TIMELINE.patient,
+    timeline: [
+      ...SAMPLE_TIMELINE.timeline,
+      {
+        id: 10,
+        encounter_id: 1,
+        event_type: "VITAL_SIGN",
+        event_time: "2026-03-10T09:00:00+00:00",
+        title: "혈압",
+        summary: "120.000/80.000 mmHg",
+        source_type: "INSTITUTION_GENERATED",
+        department: "내분비내과",
+        vital_type: "BLOOD_PRESSURE",
+        value: "120.000",
+        value_secondary: "80.000",
+        unit: "mmHg",
+        quality_warnings: [],
+        bmi: null,
+      },
+      {
+        id: 11,
+        encounter_id: 1,
+        event_type: "VITAL_SIGN",
+        event_time: "2026-03-10T09:00:00+00:00",
+        title: "체온",
+        summary: "36.500 Cel",
+        source_type: "INSTITUTION_GENERATED",
+        department: "내분비내과",
+        vital_type: "BODY_TEMPERATURE",
+        value: "36.500",
+        value_secondary: null,
+        unit: "Cel",
+        quality_warnings: ["수축기 값이 이완기 값보다 낮습니다."],
+        bmi: null,
+      },
+    ],
+  };
+
+  it("shows the Korean label and rounded value+unit for a VITAL_SIGN item", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRouter({ "/timeline": { status: 200, body: TIMELINE_WITH_VITAL_SIGNS } })
+    );
+    renderTimelinePage();
+
+    await screen.findByText("합성환자-내분비01");
+    // 활력징후 항목이 2건(혈압·체온)이라 라벨도 2번 나온다.
+    expect(screen.getAllByText("활력징후").length).toBe(2);
+    expect(screen.getByText("120/80 mmHg")).toBeInTheDocument(); // 원본 "120.000/80.000"이 반올림됨
+    expect(screen.getByText("36.5℃")).toBeInTheDocument();
+  });
+
+  it("shows a quality warning only for the VITAL_SIGN item that has one", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRouter({ "/timeline": { status: 200, body: TIMELINE_WITH_VITAL_SIGNS } })
+    );
+    renderTimelinePage();
+
+    const warning = await screen.findByText("수축기 값이 이완기 값보다 낮습니다.");
+    expect(warning.closest('[role="alert"]') ?? warning).toBeInTheDocument();
+    // 정상 혈압(경고 없음) 항목에는 경고 문구가 붙지 않는다 — 전체
+    // 경고 문구 개수가 1개뿐이어야 한다.
+    expect(screen.getAllByText("수축기 값이 이완기 값보다 낮습니다.")).toHaveLength(1);
+  });
+
+  it("shows BMI next to the ENCOUNTER item when the backend provides it", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const timelineWithBmi = {
+      patient: SAMPLE_TIMELINE.patient,
+      timeline: SAMPLE_TIMELINE.timeline.map((item) =>
+        item.event_type === "ENCOUNTER" ? { ...item, bmi: "22.5" } : item
+      ),
+    };
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRouter({ "/timeline": { status: 200, body: timelineWithBmi } })
+    );
+    renderTimelinePage();
+
+    expect(await screen.findByText(/BMI 22\.5/)).toBeInTheDocument();
+  });
+
+  it("does not show a BMI line when the backend does not provide one", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchRouter({ "/timeline": { status: 200, body: SAMPLE_TIMELINE } }));
+    renderTimelinePage();
+
+    await screen.findByText("합성환자-내분비01");
+    expect(screen.queryByText(/BMI/)).not.toBeInTheDocument();
+  });
+
+  it("still renders existing event types unchanged when the response has no vital signs", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchRouter({ "/timeline": { status: 200, body: SAMPLE_TIMELINE } }));
+    renderTimelinePage();
+
+    await screen.findByText("합성환자-내분비01");
+    expect(screen.getByText("검사결과")).toBeInTheDocument();
+    expect(screen.getByText(/8\.1%/)).toBeInTheDocument();
+  });
 });

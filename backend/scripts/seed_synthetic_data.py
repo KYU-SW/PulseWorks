@@ -18,6 +18,7 @@ Task 4(합성 데이터 Seed)는 인증/로그인을 구현하지 않았기 때�
 """
 
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
@@ -38,8 +39,11 @@ from app.models import (
     Role,
     SourceType,
     User,
+    VitalSign,
+    VitalType,
 )
 from app.services.safety_rules import LabAbnormalStatus, evaluate_lab_abnormal
+from app.services.vital_sign_derived import CANONICAL_UNITS
 
 # Not a real password hash — Task 5 replaces this with a real bcrypt hash of
 # DEMO_PASSWORD for every synthetic account. Kept only as the sentinel value
@@ -318,6 +322,73 @@ def seed(db: Session) -> None:
                 source_type=SourceType.PATIENT_REPORTED,
             )
         )
+
+    db.flush()
+
+    # Task F4-A(seed 멱등성 보완): VitalSign 생성을 endo_created 가드에서
+    # 분리한다. Patient/Encounter는 이미 존재해도(endo_created=False)
+    # VitalSign만 필요하면 추가할 수 있어야 한다 — 그래야 이미 seed된
+    # 실제 DB에 다시 seed()를 실행했을 때도 VitalSign이 채워진다.
+    #
+    # 정확한 대상 Encounter는 내부 숫자 ID를 하드코딩하지 않고, 날짜(연·월·
+    # 일)와 진료과로 읍기 전용 조회해 찾는다. 멱등성 기준은 사용자가 지정한
+    # (encounter_id, vital_type, measured_at) 조합이다 — 이미 같은 조합의
+    # VitalSign이 있으면 다시 추가하지 않는다.
+    _endo_vitals_by_visit_date: dict[tuple[int, int, int], dict[VitalType, tuple]] = {
+        (2026, 3, 10): {
+            # Task F4-A: 7종 전부 정상값 + 키/체중(같은 Encounter)으로
+            # BMI 계산 가능 사례를 보여준다. (systolic, diastolic)
+            VitalType.BLOOD_PRESSURE: (Decimal("120"), Decimal("80")),
+            VitalType.BODY_HEIGHT: (Decimal("170.0"), None),
+            VitalType.BODY_WEIGHT: (Decimal("65.0"), None),
+            VitalType.BODY_TEMPERATURE: (Decimal("36.5"), None),
+            VitalType.HEART_RATE: (Decimal("72"), None),
+            VitalType.RESPIRATORY_RATE: (Decimal("16"), None),
+            VitalType.PULSE_OXIMETRY: (Decimal("98"), None),
+        },
+        (2026, 6, 10): {
+            # Task F4-A: 수축기(80) < 이완기(120) — 혈압 역전 품질
+            # 경고를 보여주는 사례. 저장은 그대로 허용된다(거부 아님).
+            VitalType.BLOOD_PRESSURE: (Decimal("80"), Decimal("120")),
+        },
+    }
+
+    endo_encounters = (
+        db.query(Encounter)
+        .filter_by(patient_id=endo_patient.id, department=Department.ENDOCRINOLOGY)
+        .all()
+    )
+    for encounter in endo_encounters:
+        visit_date = (
+            encounter.start_time.year, encounter.start_time.month, encounter.start_time.day,
+        )
+        vitals_for_this_visit = _endo_vitals_by_visit_date.get(visit_date)
+        if not vitals_for_this_visit:
+            continue
+
+        for vital_type, (value, value_secondary) in vitals_for_this_visit.items():
+            already_exists = (
+                db.query(VitalSign)
+                .filter_by(
+                    encounter_id=encounter.id,
+                    vital_type=vital_type,
+                    measured_at=encounter.start_time,
+                )
+                .first()
+            )
+            if already_exists is not None:
+                continue
+            db.add(
+                VitalSign(
+                    encounter_id=encounter.id,
+                    vital_type=vital_type,
+                    value=value,
+                    value_secondary=value_secondary,
+                    unit=CANONICAL_UNITS[vital_type],
+                    measured_at=encounter.start_time,
+                    source_type=SourceType.INSTITUTION_GENERATED,
+                )
+            )
 
     db.flush()
 

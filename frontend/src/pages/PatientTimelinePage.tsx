@@ -8,6 +8,10 @@ import {
   PatientTimeline,
   TimelineEventType,
 } from "../api/timeline";
+import {
+  formatVitalSignValue,
+  VitalType as VitalSignType,
+} from "../components/vitalSign/formatVitalSign";
 import LabTrendSection from "../components/LabTrendSection";
 import AppShell from "../components/ui/AppShell";
 import AppHeader from "../components/ui/AppHeader";
@@ -30,6 +34,7 @@ const EVENT_TYPE_LABELS: Record<TimelineEventType, string> = {
   LAB_RESULT: "검사결과",
   PRESCRIPTION: "처방",
   CLINICAL_NOTE: "진료기록",
+  VITAL_SIGN: "활력징후", // Task F4-A
 };
 
 const SOURCE_TYPE_LABELS: Record<string, string> = {
@@ -192,13 +197,35 @@ export default function PatientTimelinePage() {
                         <span>{new Date(item.event_time).toLocaleString()}</span>{" — "}
                         <strong>{EVENT_TYPE_LABELS[item.event_type]}</strong>{" — "}
                         <span>{item.title}</span>{" — "}
-                        <span>{item.summary}</span>{" — "}
+                        <span>
+                          {item.event_type === "VITAL_SIGN" &&
+                          item.vital_type &&
+                          item.value &&
+                          item.unit
+                            ? formatVitalSignValue(
+                                item.vital_type as VitalSignType,
+                                item.value,
+                                item.value_secondary ?? null,
+                                item.unit
+                              )
+                            : item.summary}
+                        </span>{" — "}
                         <span>{item.department}</span>{" — "}
                         <span>
                           {item.source_type
                             ? SOURCE_TYPE_LABELS[item.source_type] ?? item.source_type
                             : "-"}
                         </span>
+                        {item.event_type === "VITAL_SIGN" &&
+                          item.quality_warnings &&
+                          item.quality_warnings.length > 0 && (
+                            <AlertBox variant="warning">
+                              {item.quality_warnings.join(" ")}
+                            </AlertBox>
+                          )}
+                        {item.event_type === "ENCOUNTER" && item.bmi && (
+                          <span>{" — "}BMI {item.bmi}</span>
+                        )}
                         {item.event_type === "ENCOUNTER" && (
                           <>
                             {" — "}

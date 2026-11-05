@@ -16,7 +16,10 @@ PATIENT_EMAIL = "patient1@example.test"
 ADMIN_STAFF_EMAIL = "admin.staff@example.test"
 SYSTEM_ADMIN_EMAIL = "system.admin@example.test"
 
-ALL_EVENT_TYPES = {"ENCOUNTER", "DIAGNOSIS", "LAB_RESULT", "PRESCRIPTION", "CLINICAL_NOTE"}
+ALL_EVENT_TYPES = {
+    "ENCOUNTER", "DIAGNOSIS", "LAB_RESULT", "PRESCRIPTION", "CLINICAL_NOTE",
+    "VITAL_SIGN",  # Task F4-A
+}
 
 
 def _login(email: str) -> str:
@@ -147,8 +150,8 @@ def test_nonexistent_patient_returns_404(db_session, override_get_db):
     assert response.json()["detail"] == "환자를 찾을 수 없거나 조회할 수 없습니다."
 
 
-# 10. 5개 event_type 반환 확인
-def test_timeline_includes_all_five_event_types(db_session, override_get_db):
+# 10. 6개 event_type 반환 확인(Task F4-A: VITAL_SIGN 추가)
+def test_timeline_includes_all_six_event_types(db_session, override_get_db):
     seed(db_session)
     patient_id = _endo_patient_id(db_session)
     token = _login(ENDOCRINE_DOCTOR_EMAIL)
@@ -212,9 +215,13 @@ def test_response_never_includes_password_or_hash(db_session, override_get_db):
     assert "hashed_password" not in response.text
     assert "password" not in response.text
     for item in response.json()["timeline"]:
+        # Task F4-A: VitalSign 전용 필드 6개가 모든 item에 추가됐다(기존
+        # 5개 event_type에서는 전부 null/빈 배열) — 그래서 집합에 포함.
         assert set(item.keys()) == {
             "id", "encounter_id", "event_type", "event_time",
             "title", "summary", "source_type", "department",
+            "vital_type", "value", "value_secondary", "unit",
+            "quality_warnings", "bmi",
         }
 
 
@@ -383,3 +390,110 @@ def test_clinical_note_summary_never_exceeds_truncation_limit(db_session, overri
         assert len(summary) <= 303
         if len(summary) == 303:
             assert summary.endswith("...")
+
+
+# ======================= Task F4-A: VitalSign 타임라인 =======================
+
+
+def test_vital_sign_items_show_korean_labels_and_canonical_units(db_session, override_get_db):
+    seed(db_session)
+    patient_id = _endo_patient_id(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+
+    response = client.get(f"/patients/{patient_id}/timeline", headers=_auth_header(token))
+    vitals = [item for item in response.json()["timeline"] if item["event_type"] == "VITAL_SIGN"]
+
+    titles = {v["title"] for v in vitals}
+    assert titles == {"혈압", "키", "체중", "체온", "맥박", "호흡수", "산소포화도"}
+
+    heart_rate = next(v for v in vitals if v["title"] == "맥박")
+    # Numeric(10,3) 컬럼이 저장 시 소수점 3자리로 맞추므로 "72.000"이다
+    # (정밀도 보존 — float처럼 "72"로 깎이지 않는다).
+    assert heart_rate["value"] == "72.000"
+    assert heart_rate["unit"] == "/min"
+    assert heart_rate["vital_type"] == "HEART_RATE"
+    assert heart_rate["value_secondary"] is None
+
+
+def test_blood_pressure_shows_both_components_as_precision_preserving_strings(
+    db_session, override_get_db
+):
+    seed(db_session)
+    patient_id = _endo_patient_id(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+
+    response = client.get(f"/patients/{patient_id}/timeline", headers=_auth_header(token))
+    bp_items = [
+        item for item in response.json()["timeline"]
+        if item["event_type"] == "VITAL_SIGN" and item["vital_type"] == "BLOOD_PRESSURE"
+    ]
+
+    assert len(bp_items) == 2  # 3월(정상), 6월(역전) 두 건
+    for item in bp_items:
+        assert isinstance(item["value"], str)
+        assert isinstance(item["value_secondary"], str)
+        assert item["unit"] == "mmHg"
+
+
+def test_reversed_blood_pressure_has_a_quality_warning_but_is_not_rejected(
+    db_session, override_get_db
+):
+    seed(db_session)
+    patient_id = _endo_patient_id(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+
+    response = client.get(f"/patients/{patient_id}/timeline", headers=_auth_header(token))
+    bp_items = [
+        item for item in response.json()["timeline"]
+        if item["event_type"] == "VITAL_SIGN" and item["vital_type"] == "BLOOD_PRESSURE"
+    ]
+
+    reversed_item = next(item for item in bp_items if item["value"] == "80.000")
+    normal_item = next(item for item in bp_items if item["value"] == "120.000")
+
+    assert len(reversed_item["quality_warnings"]) > 0
+    assert normal_item["quality_warnings"] == []
+    # 경고가 있어도 값은 그대로 저장·표시된다 — 거부되지 않는다.
+    assert reversed_item["value_secondary"] == "120.000"
+
+
+def test_bmi_is_attached_only_to_the_encounter_with_both_height_and_weight(
+    db_session, override_get_db
+):
+    seed(db_session)
+    patient_id = _endo_patient_id(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+
+    response = client.get(f"/patients/{patient_id}/timeline", headers=_auth_header(token))
+    encounter_items = [
+        item for item in response.json()["timeline"] if item["event_type"] == "ENCOUNTER"
+    ]
+
+    with_bmi = [item for item in encounter_items if item["bmi"] is not None]
+    assert len(with_bmi) == 1
+    assert with_bmi[0]["bmi"] == "22.5"  # 65kg / 1.70m^2
+
+    without_bmi = [item for item in encounter_items if item["bmi"] is None]
+    assert len(without_bmi) == len(encounter_items) - 1
+
+
+def test_vital_signs_do_not_leak_across_encounters(db_session, override_get_db):
+    """6월 Encounter에는 혈압만 seed했다 — 3월 Encounter의 키·체중·체온
+    등이 섞여 들어오면 안 된다(encounter_id로 조회 범위가 좁혀짐)."""
+    seed(db_session)
+    patient_id = _endo_patient_id(db_session)
+    token = _login(ENDOCRINE_DOCTOR_EMAIL)
+
+    response = client.get(f"/patients/{patient_id}/timeline", headers=_auth_header(token))
+    timeline = response.json()["timeline"]
+
+    june_encounter_id = next(
+        item["encounter_id"] for item in timeline
+        if item["event_type"] == "ENCOUNTER" and "2026-06" in item["event_time"]
+    )
+    june_vitals = [
+        item for item in timeline
+        if item["event_type"] == "VITAL_SIGN" and item["encounter_id"] == june_encounter_id
+    ]
+
+    assert {v["vital_type"] for v in june_vitals} == {"BLOOD_PRESSURE"}

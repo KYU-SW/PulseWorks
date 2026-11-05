@@ -14,10 +14,17 @@ from app.models import (
     Prescription,
     Role,
     User,
+    VitalSign,
+    VitalType,
 )
 from app.schemas.encounter import PatientTimelineOut, TimelineItemOut, TimelinePatientOut
 from app.services.audit import write_audit_log
 from app.services.authorization import can_access_patient
+from app.services.vital_sign_derived import (
+    VitalSignLike,
+    calculate_bmi,
+    evaluate_vital_sign_quality,
+)
 from app.utils.text import truncate_for_display as _truncate_for_display
 
 router = APIRouter(prefix="/patients", tags=["encounters"])
@@ -33,6 +40,36 @@ _ENCOUNTER_TYPE_LABELS = {
     EncounterType.INPATIENT: "입원",
     EncounterType.EMERGENCY: "응급",
 }
+
+# Task F4-A: KR Core IG v1.0.2에서 확인한 7종(docs/standards/
+# kr-cdi-kr-core-mapping.md 참고)의 환자·의사 화면용 한글 라벨.
+_VITAL_TYPE_LABELS = {
+    VitalType.BLOOD_PRESSURE: "혈압",
+    VitalType.BODY_HEIGHT: "키",
+    VitalType.BODY_WEIGHT: "체중",
+    VitalType.BODY_TEMPERATURE: "체온",
+    VitalType.HEART_RATE: "맥박",
+    VitalType.RESPIRATORY_RATE: "호흡수",
+    VitalType.PULSE_OXIMETRY: "산소포화도",
+}
+
+
+def _to_vital_sign_like(vital: VitalSign) -> VitalSignLike:
+    return VitalSignLike(
+        id=vital.id,
+        encounter_id=vital.encounter_id,
+        vital_type=vital.vital_type,
+        value=vital.value,
+        value_secondary=vital.value_secondary,
+        unit=vital.unit,
+        measured_at=vital.measured_at,
+    )
+
+
+def _format_vital_sign_summary(vital: VitalSignLike) -> str:
+    if vital.vital_type == VitalType.BLOOD_PRESSURE and vital.value_secondary is not None:
+        return f"{vital.value}/{vital.value_secondary} {vital.unit}"
+    return f"{vital.value} {vital.unit}"
 
 
 def _sort_key(item: TimelineItemOut) -> tuple:
@@ -68,6 +105,27 @@ def get_patient_timeline(
     encounter_ids = [encounter.id for encounter in encounters]
     department_by_encounter_id = {encounter.id: encounter.department for encounter in encounters}
 
+    # Task F4-A: encounter 목록을 알아야 BMI를 계산할 수 있으므로,
+    # VitalSign은 ENCOUNTER 타임라인 항목을 만들기 전에 먼저 조회한다.
+    all_vital_signs: list[VitalSign] = (
+        db.query(VitalSign).filter(VitalSign.encounter_id.in_(encounter_ids)).all()
+        if encounter_ids
+        else []
+    )
+    vitals_by_encounter_id: dict[int, list[VitalSignLike]] = {eid: [] for eid in encounter_ids}
+    for vital in all_vital_signs:
+        vitals_by_encounter_id[vital.encounter_id].append(_to_vital_sign_like(vital))
+
+    bmi_by_encounter_id: dict[int, str] = {}
+    for eid, vitals in vitals_by_encounter_id.items():
+        heights = [v for v in vitals if v.vital_type == VitalType.BODY_HEIGHT]
+        weights = [v for v in vitals if v.vital_type == VitalType.BODY_WEIGHT]
+        latest_height = max(heights, key=lambda v: v.measured_at, default=None)
+        latest_weight = max(weights, key=lambda v: v.measured_at, default=None)
+        bmi = calculate_bmi(latest_height, latest_weight)
+        if bmi is not None:
+            bmi_by_encounter_id[eid] = str(bmi)
+
     items: list[TimelineItemOut] = []
 
     for encounter in encounters:
@@ -83,6 +141,7 @@ def get_patient_timeline(
                 summary=f"{department_label} {type_label} 방문 (합성 데이터)",
                 source_type=None,  # Encounter 모델엔 source_type이 없다.
                 department=department_label,
+                bmi=bmi_by_encounter_id.get(encounter.id),
             )
         )
 
@@ -159,6 +218,35 @@ def get_patient_timeline(
                     summary=_truncate_for_display(note.note_text),
                     source_type=note.source_type.value,
                     department=department_label,
+                )
+            )
+
+        # Task F4-A: VitalSign — 품질 경고는 같은 Encounter의 나머지
+        # VitalSign들과만 비교한다(다른 Encounter 값이 섞이지 않도록
+        # vitals_by_encounter_id로 미리 범위를 좁혀 둔 리스트를 그대로 씀).
+        for vital in all_vital_signs:
+            department_label = _DEPARTMENT_LABELS[department_by_encounter_id[vital.encounter_id]]
+            candidate = _to_vital_sign_like(vital)
+            quality = evaluate_vital_sign_quality(
+                candidate, vitals_by_encounter_id[vital.encounter_id]
+            )
+            items.append(
+                TimelineItemOut(
+                    id=vital.id,
+                    encounter_id=vital.encounter_id,
+                    event_type="VITAL_SIGN",
+                    event_time=vital.measured_at,
+                    title=_VITAL_TYPE_LABELS[vital.vital_type],
+                    summary=_format_vital_sign_summary(candidate),
+                    source_type=vital.source_type.value,
+                    department=department_label,
+                    vital_type=vital.vital_type.value,
+                    value=str(vital.value),
+                    value_secondary=(
+                        str(vital.value_secondary) if vital.value_secondary is not None else None
+                    ),
+                    unit=vital.unit,
+                    quality_warnings=quality.messages,
                 )
             )
 
