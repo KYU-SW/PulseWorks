@@ -13,6 +13,9 @@ import {
   VitalType as VitalSignType,
 } from "../components/vitalSign/formatVitalSign";
 import LabTrendSection from "../components/LabTrendSection";
+import EncounterSummaryCard, {
+  groupTimelineByEncounter,
+} from "../components/encounterSummary/EncounterSummaryCard";
 import AppShell from "../components/ui/AppShell";
 import AppHeader from "../components/ui/AppHeader";
 import Navigation from "../components/ui/Navigation";
@@ -183,6 +186,23 @@ export default function PatientTimelinePage() {
               {reportError}
             </AlertBox>
           )}
+
+          <SectionCard title="Encounter 요약">
+            {(() => {
+              const encounterSummaries = groupTimelineByEncounter(data.timeline);
+              return encounterSummaries.length === 0 ? (
+                <EmptyState title="표시할 Encounter 요약이 없습니다." />
+              ) : (
+                <ul className="page-stack">
+                  {encounterSummaries.map((summary) => (
+                    <li key={summary.encounterItem.encounter_id}>
+                      <EncounterSummaryCard summary={summary} />
+                    </li>
+                  ))}
+                </ul>
+              );
+            })()}
+          </SectionCard>
 
           <SectionCard title="임상 타임라인">
             {data.timeline.length === 0 ? (

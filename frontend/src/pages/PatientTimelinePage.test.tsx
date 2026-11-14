@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -476,8 +476,11 @@ describe("PatientTimelinePage", () => {
     renderTimelinePage();
 
     await screen.findByText("합성환자-내분비01");
-    // 활력징후 항목이 2건(혈압·체온)이라 라벨도 2번 나온다.
-    expect(screen.getAllByText("활력징후").length).toBe(2);
+    // UX-1B: "활력징후" 라벨이 신규 Encounter 요약 섹션에도 나타나므로,
+    // 기존 평면 "임상 타임라인" 섹션 내부로 범위를 좁혀서 확인한다(2건:
+    // 혈압·체온).
+    const flatTimeline = screen.getByRole("region", { name: "임상 타임라인" });
+    expect(within(flatTimeline).getAllByText("활력징후").length).toBe(2);
     expect(screen.getByText("120/80 mmHg")).toBeInTheDocument(); // 원본 "120.000/80.000"이 반올림됨
     expect(screen.getByText("36.5℃")).toBeInTheDocument();
   });
@@ -531,5 +534,71 @@ describe("PatientTimelinePage", () => {
     await screen.findByText("합성환자-내분비01");
     expect(screen.getByText("검사결과")).toBeInTheDocument();
     expect(screen.getByText(/8\.1%/)).toBeInTheDocument();
+  });
+
+  // ==================== UX-1B: Encounter Summary Card ====================
+
+  it("renders an Encounter summary section alongside the existing flat timeline", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const TIMELINE_WITH_ONE_FULL_ENCOUNTER = {
+      patient: SAMPLE_TIMELINE.patient,
+      timeline: [
+        {
+          id: 1,
+          encounter_id: 1,
+          event_type: "ENCOUNTER",
+          event_time: "2026-03-10T09:00:00+00:00",
+          title: "내분비내과 외래 방문",
+          summary: "내분비내과 외래 방문 (합성 데이터)",
+          source_type: null,
+          department: "내분비내과",
+        },
+        {
+          id: 3,
+          encounter_id: 1,
+          event_type: "LAB_RESULT",
+          event_time: "2026-03-10T09:05:00+00:00",
+          title: "HbA1c",
+          summary: "7.2% (참고범위 4.0-6.0%)",
+          source_type: "INSTITUTION_GENERATED",
+          department: "내분비내과",
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRouter({ "/timeline": { status: 200, body: TIMELINE_WITH_ONE_FULL_ENCOUNTER } })
+    );
+    renderTimelinePage();
+
+    await screen.findByText("합성환자-내분비01");
+    // 신규 섹션과 기존 평면 타임라인이 모두 존재해야 한다(기존 Timeline 대체/삭제 없음).
+    expect(screen.getByRole("heading", { name: "Encounter 요약" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "임상 타임라인" })).toBeInTheDocument();
+    // "HbA1c"가 두 섹션(Encounter 요약 + 평면 타임라인)에 각각 나타난다.
+    expect(screen.getAllByText(/HbA1c/).length).toBe(2);
+  });
+
+  it("does not issue any additional API request for the Encounter summary section", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = mockFetchRouter({ "/timeline": { status: 200, body: SAMPLE_TIMELINE } });
+    vi.stubGlobal("fetch", fetchMock);
+    renderTimelinePage();
+
+    await screen.findByText("합성환자-내분비01");
+    // 기존과 동일하게 /timeline, /lab-trends 두 번만 호출된다 - Encounter별
+    // 추가 조회(N+1)나 신규 endpoint 호출이 없다.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves the existing report-generation action in the flat timeline after adding the summary section", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchRouter({ "/timeline": { status: 200, body: SAMPLE_TIMELINE } }));
+    renderTimelinePage();
+
+    await screen.findByText("합성환자-내분비01");
+    expect(
+      screen.getByRole("button", { name: "이 방문으로 진료참고 보고서 생성" })
+    ).toBeInTheDocument();
   });
 });
