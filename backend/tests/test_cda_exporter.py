@@ -128,6 +128,24 @@ class TestWellFormedness:
         assert b"encoding='UTF-8'" in _export_bytes() or b'encoding="UTF-8"' in _export_bytes()
 
 
+class TestTypeIdNormativeConstant:
+    """HL7-4A.1 Gate 1: ClinicalDocument.typeId를 공식 HL7 CDA R2.0
+    StructureDefinition(hl7.org/cda/stds/core)으로 재확인한 결과
+    root="2.16.840.1.113883.1.3"/extension="POCD_HD000040"이 Fixed
+    Value임이 CONFIRMED됐다. 이 값은 현재 구현과 일치하므로 production
+    코드는 변경하지 않고, 이 상수를 보호하는 regression test만 둔다."""
+
+    def test_type_id_root_matches_hl7_registered_models_oid(self):
+        root = etree.fromstring(_export_bytes())
+        type_id = root.find(f"{{{_CDA_NS}}}typeId")
+        assert type_id.get("root") == "2.16.840.1.113883.1.3"
+
+    def test_type_id_extension_matches_cda_r2_hierarchical_description(self):
+        root = etree.fromstring(_export_bytes())
+        type_id = root.find(f"{{{_CDA_NS}}}typeId")
+        assert type_id.get("extension") == "POCD_HD000040"
+
+
 class TestEscaping:
     def test_script_tag_in_narrative_is_escaped_not_executable_markup(self):
         xml_bytes = _export_bytes()
