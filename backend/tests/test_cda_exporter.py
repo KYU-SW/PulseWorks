@@ -184,6 +184,69 @@ class TestBloodPressureOrganizer:
         assert len(observations) == 2
 
 
+class TestOrganizerActStatus:
+    """HL7-4A.2: BP Organizer.statusCode를 공식 ActStatus
+    (terminology.hl7.org/CodeSystem/v3-ActStatus, OID
+    2.16.840.1.113883.5.14) "completed"로 표현한다 - 이미 DB에 저장된
+    과거 시점 측정값을 묶는 것일 뿐 ongoing workflow가 아니므로 공식
+    정의("terminated normally after all of its constituents have been
+    performed")와 의미가 일치한다."""
+
+    def test_organizer_status_code_is_completed(self):
+        root = etree.fromstring(_export_bytes())
+        organizer = root.find(f".//{{{_CDA_NS}}}organizer")
+        status_code = organizer.find(f"{{{_CDA_NS}}}statusCode")
+        assert status_code is not None
+        assert status_code.get("code") == "completed"
+
+    def test_organizer_status_code_system_is_official_act_status_oid(self):
+        root = etree.fromstring(_export_bytes())
+        organizer = root.find(f".//{{{_CDA_NS}}}organizer")
+        status_code = organizer.find(f"{{{_CDA_NS}}}statusCode")
+        assert status_code.get("codeSystem") == "2.16.840.1.113883.5.14"
+
+    def test_organizer_status_code_has_no_null_flavor(self):
+        root = etree.fromstring(_export_bytes())
+        organizer = root.find(f".//{{{_CDA_NS}}}organizer")
+        status_code = organizer.find(f"{{{_CDA_NS}}}statusCode")
+        assert status_code.get("nullFlavor") is None
+
+    def test_organizer_status_code_has_only_code_and_code_system_attributes(self):
+        # §12: displayName/codeSystemName/status text/interpretationCode
+        # 등 추가 정보를 넣지 않는다 - code/codeSystem 두 속성만 있어야
+        # 한다.
+        root = etree.fromstring(_export_bytes())
+        organizer = root.find(f".//{{{_CDA_NS}}}organizer")
+        status_code = organizer.find(f"{{{_CDA_NS}}}statusCode")
+        assert set(status_code.keys()) == {"code", "codeSystem"}
+
+    def test_organizer_status_code_appears_immediately_after_code_element(self):
+        # Organizer 자식 순서(HL7-1A §12 subset): id -> code -> statusCode
+        # -> component. ActStatus 적용으로 위치가 바뀌지 않았는지
+        # 확인한다(이 assertion은 변경 전에도 이미 성립하는 위치
+        # regression guard다 - RED 대상은 위 4개 테스트).
+        root = etree.fromstring(_export_bytes())
+        organizer = root.find(f".//{{{_CDA_NS}}}organizer")
+        child_tags = [etree.QName(child).localname for child in organizer]
+        assert child_tags.index("statusCode") == child_tags.index("code") + 1
+
+
+class TestObservationStatusCodeRegression:
+    """HL7-4A.2 §13 regression guard: Organizer.statusCode 변경이 어떤
+    Observation에도 퍼지지 않아야 한다 - VitalSign 단일값/BP systolic·
+    diastolic/LabResult/Diagnosis 전부 statusCode가 계속 생략돼야 한다
+    (CDA Core에서 optional이고, 공식 lifecycle state를 derive할 소스
+    데이터가 없음, HL7-3A). 이 test는 production 변경 전에도 이미
+    GREEN이다 - 새 기능 RED와는 별개의 비퇴행 보증이다."""
+
+    def test_no_observation_anywhere_has_a_status_code_element(self):
+        root = etree.fromstring(_export_bytes())
+        observations = root.findall(f".//{{{_CDA_NS}}}observation")
+        assert len(observations) > 0
+        for observation in observations:
+            assert observation.find(f"{{{_CDA_NS}}}statusCode") is None
+
+
 class TestTerminologyRendering:
     def test_confidentiality_code_is_rendered(self):
         root = etree.fromstring(_export_bytes())

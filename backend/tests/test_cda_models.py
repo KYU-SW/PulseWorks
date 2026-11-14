@@ -153,10 +153,12 @@ class TestCdaObservationAndOrganizer:
             effective_time=ts,
         )
 
+        status = CodedValue.known(code="completed", code_system="2.16.840.1.113883.5.14")
         organizer = CdaOrganizer(
             identifier=Identifier(root="1b4e28ba-2fa1-11d2-883f-0016d3cca427", extension="vital_sign:1"),
             code=CodedValue.known(code="85354-9", code_system="2.16.840.1.113883.6.1"),
             components=(systolic, diastolic),
+            status=status,
         )
         assert len(organizer.components) == 2
 
@@ -165,4 +167,5 @@ class TestCdaObservationAndOrganizer:
                 identifier=Identifier(root="1b4e28ba-2fa1-11d2-883f-0016d3cca427", extension="vital_sign:2"),
                 code=CodedValue.known(code="85354-9", code_system="2.16.840.1.113883.6.1"),
                 components=(systolic,),
+                status=status,
             )

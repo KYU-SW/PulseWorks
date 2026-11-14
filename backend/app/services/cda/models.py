@@ -144,11 +144,18 @@ class CdaOrganizer:
     """혈압 Organizer 표현. components는 schema상 0..*이지만(HL7-1A §12),
     이 프로젝트에서 "혈압"이라는 의미를 가지려면 정확히 2개(수축기+
     이완기)여야 한다 - 1개짜리 Organizer는 만들지 않는다(HL7-2 §11:
-    하나만 있으면 Organizer 대신 단일 Observation으로 승격시킨다)."""
+    하나만 있으면 Organizer 대신 단일 Observation으로 승격시킨다).
+
+    status: Organizer.statusCode(1..1 필수)의 임상 의미(HL7-4A.2) - Mapper가
+    결정해 여기 담고, Exporter는 이 값을 그대로 code/codeSystem으로
+    직렬화만 한다(의미를 새로 판단하지 않음). CodedValue를 재사용하므로
+    nullFlavor 상태(unknown)와 실제 code 상태(known)가 동시에 표현될 수
+    없다는 불변식이 CodedValue 자체의 3-state 설계로 이미 보장된다."""
 
     identifier: Identifier
     code: CodedValue
     components: tuple[CdaObservation, ...]
+    status: CodedValue
 
     def __post_init__(self) -> None:
         if len(self.components) != 2:

@@ -106,3 +106,15 @@ CDA_DOCUMENT_CODE_ORIGINAL_TEXT = CodedValue.unknown(original_text="진료참고
 # 코드 주석(clinical_reports.py의 "진료참고 보고서" 표현)과 동일한
 # 용어를 재사용한다.
 CDA_DOCUMENT_TITLE = "진료참고 보고서"
+
+# HL7-4A.2 Gate 2(HL7-4A.1에서 공식 확인): 공식 HL7 v3 ActStatus
+# CodeSystem(http://terminology.hl7.org/CodeSystem/v3-ActStatus,
+# OID 2.16.840.1.113883.5.14)의 "completed" 코드 - "An Act that has
+# terminated normally after all of its constituents have been
+# performed." 이 프로젝트에서 유일한 Organizer 사용처인 BP Organizer는
+# 이미 DB에 저장된, 특정 과거 measured_at 시점에 확정된 systolic/
+# diastolic 측정값만 묶는다(ongoing workflow 아님) - 이 공식 정의와
+# 의미가 정확히 일치한다. Observation.statusCode(optional)에는 적용하지
+# 않는다 - 그쪽은 derive할 lifecycle state 소스 데이터가 없다(HL7-3A).
+ACT_STATUS_CODE_SYSTEM = "2.16.840.1.113883.5.14"
+CDA_ORGANIZER_STATUS_COMPLETED = CodedValue.known(code="completed", code_system=ACT_STATUS_CODE_SYSTEM)

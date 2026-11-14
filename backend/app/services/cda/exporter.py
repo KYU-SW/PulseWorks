@@ -154,12 +154,14 @@ def _organizer_element(organizer: CdaOrganizer) -> etree._Element:
 
     elem.append(_coded_element("code", organizer.code))
 
-    # Organizer.statusCode는 1..1 필수(HL7-1A §12)이지만 공식 ActStatus
-    # 허용값은 확인하지 못했다 - "completed" 등을 추측해 넣지 않고,
-    # 필수 element는 채우되 허위 코드는 넣지 않기 위해 nullFlavor="UNK"
-    # 를 쓴다.
-    status_code_elem = etree.SubElement(elem, _qname("statusCode"))
-    status_code_elem.set("nullFlavor", "UNK")
+    # Organizer.statusCode는 1..1 필수(HL7-1A §12). HL7-4A.2: 공식
+    # ActStatus "completed"(terminology.hl7.org/CodeSystem/v3-ActStatus,
+    # OID 2.16.840.1.113883.5.14)를 Mapper가 이미 결정해 IR(organizer.
+    # status)에 담아 뒀다 - Exporter는 Organizer 종류를 보고 의미를 새로
+    # 판단하지 않고, 주어진 CodedValue를 code/codeSystem으로 그대로
+    # 직렬화만 한다(_coded_element 재사용, displayName 등 미확인/불필요한
+    # 정보는 추가하지 않음).
+    elem.append(_coded_element("statusCode", organizer.status))
 
     for component_observation in organizer.components:
         component_elem = etree.SubElement(elem, _qname("component"))

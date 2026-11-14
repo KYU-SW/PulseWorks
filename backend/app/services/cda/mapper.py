@@ -40,6 +40,7 @@ from app.services.cda.terminology import (
     CDA_CONFIDENTIALITY_CODE,
     CDA_DOCUMENT_CODE_ORIGINAL_TEXT,
     CDA_DOCUMENT_TITLE,
+    CDA_ORGANIZER_STATUS_COMPLETED,
     normalize_unit,
     vital_type_coded_value,
 )
@@ -100,6 +101,10 @@ def build_blood_pressure_entry(
         identifier=Identifier(root=entry_id_root, extension=source_record_id),
         code=_bp_coded_value(BLOOD_PRESSURE_PANEL_LOINC),
         components=(systolic, diastolic),
+        # HL7-4A.2: 이 Organizer는 항상 완전한(둘 다 존재하는) BP에만
+        # 만들어진다 - 즉 이미 확정된 과거 측정값의 묶음이므로 공식
+        # ActStatus "completed"(terminology.py)와 의미가 일치한다.
+        status=CDA_ORGANIZER_STATUS_COMPLETED,
     )
     return organizer, None
 
