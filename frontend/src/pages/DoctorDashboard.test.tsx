@@ -217,3 +217,121 @@ describe("DoctorDashboard", () => {
     expect(screen.getByText("LOGIN_SCREEN")).toBeInTheDocument();
   });
 });
+
+describe("DoctorDashboard Patient Search (UX-1A)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    sessionStorage.clear();
+  });
+
+  // 1. 빈 query -> 전체 담당 환자 표시(기존 동작 그대로, 검색 결과 수 문구 없음)
+  it("shows every assigned patient when the search box is empty", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_PATIENTS));
+    renderDashboard();
+
+    await screen.findByText(/합성환자-내분비01/);
+    expect(screen.getByText(/합성환자-일반01/)).toBeInTheDocument();
+    expect(screen.queryByText(/검색 결과/)).not.toBeInTheDocument();
+  });
+
+  // 2. MRN 부분 검색
+  it("filters by a partial MRN match", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_PATIENTS));
+    renderDashboard();
+    await screen.findByText(/합성환자-내분비01/);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("환자 이름 또는 MRN 검색"), "0001");
+
+    expect(screen.getByText(/합성환자-내분비01/)).toBeInTheDocument();
+    expect(screen.queryByText(/합성환자-일반01/)).not.toBeInTheDocument();
+  });
+
+  // 3. MRN case-insensitive 검색
+  it("matches MRN regardless of letter case", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_PATIENTS));
+    renderDashboard();
+    await screen.findByText(/합성환자-내분비01/);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("환자 이름 또는 MRN 검색"), "syn-0001");
+
+    expect(screen.getByText(/합성환자-내분비01/)).toBeInTheDocument();
+    expect(screen.queryByText(/합성환자-일반01/)).not.toBeInTheDocument();
+  });
+
+  // 4. 이름 부분 검색
+  it("filters by a partial patient name match", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_PATIENTS));
+    renderDashboard();
+    await screen.findByText(/합성환자-내분비01/);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("환자 이름 또는 MRN 검색"), "내분비");
+
+    expect(screen.getByText(/합성환자-내분비01/)).toBeInTheDocument();
+    expect(screen.queryByText(/합성환자-일반01/)).not.toBeInTheDocument();
+  });
+
+  // 5. 검색어 앞뒤 공백 무시
+  it("ignores leading and trailing whitespace in the search query", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_PATIENTS));
+    renderDashboard();
+    await screen.findByText(/합성환자-내분비01/);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("환자 이름 또는 MRN 검색"), "  0001  ");
+
+    expect(screen.getByText(/합성환자-내분비01/)).toBeInTheDocument();
+    expect(screen.queryByText(/합성환자-일반01/)).not.toBeInTheDocument();
+    expect(screen.getByText("검색 결과 1명")).toBeInTheDocument();
+  });
+
+  // 6. 검색 결과 없음 - "배정된 환자가 없습니다"와 구분된 전용 empty state
+  it("shows a search-specific empty state, not the no-assigned-patients empty state", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_PATIENTS));
+    renderDashboard();
+    await screen.findByText(/합성환자-내분비01/);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("환자 이름 또는 MRN 검색"), "존재하지않는검색어");
+
+    expect(screen.getByText("검색 조건에 맞는 담당 환자가 없습니다.")).toBeInTheDocument();
+    expect(screen.queryByText("현재 배정된 환자가 없습니다.")).not.toBeInTheDocument();
+  });
+
+  // 7. 검색 후에도 기존 카드 navigation(상세보기 링크)이 유지됨
+  it("keeps the existing detail-page navigation link after filtering", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_PATIENTS));
+    renderDashboard();
+    await screen.findByText(/합성환자-내분비01/);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("환자 이름 또는 MRN 검색"), "0004");
+
+    const detailLinks = screen.getAllByRole("link", { name: "상세보기" });
+    expect(detailLinks).toHaveLength(1);
+    expect(detailLinks[0]).toHaveAttribute("href", "/doctor/patients/4");
+  });
+
+  // 8. 검색이 새로운 API 요청을 발생시키지 않음
+  it("does not trigger a new API request while searching", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const fetchMock = mockFetchOnce(200, SAMPLE_PATIENTS);
+    vi.stubGlobal("fetch", fetchMock);
+    renderDashboard();
+    await screen.findByText(/합성환자-내분비01/);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("환자 이름 또는 MRN 검색"), "0001");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

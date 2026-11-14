@@ -13,14 +13,32 @@ import LoadingState from "../components/ui/LoadingState";
 import EmptyState from "../components/ui/EmptyState";
 import ErrorState from "../components/ui/ErrorState";
 import AlertBox from "../components/ui/AlertBox";
+import FormField from "../components/ui/FormField";
 
 type LoadState = "loading" | "success" | "forbidden" | "error";
+
+// UX-1A: 이미 authorization을 거쳐 내려온 담당 환자 목록만 대상으로 하는
+// client-side 검색이다 — 서버에 쿼리를 보내지 않으므로 권한 범위를 넘지
+// 않는다. 이름/MRN 부분 일치, 대소문자 무시, 양끝 공백 무시만 한다(오타
+// 보정/fuzzy 검색 없음).
+function filterAssignedPatients(patients: AssignedPatient[], query: string): AssignedPatient[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (normalizedQuery === "") {
+    return patients;
+  }
+  return patients.filter((patient) => {
+    const name = patient.name.toLocaleLowerCase();
+    const mrn = patient.mrn.toLocaleLowerCase();
+    return name.includes(normalizedQuery) || mrn.includes(normalizedQuery);
+  });
+}
 
 export default function DoctorDashboard() {
   const { role, logout } = useAuth();
   const navigate = useNavigate();
   const [patients, setPatients] = useState<AssignedPatient[]>([]);
   const [state, setState] = useState<LoadState>("loading");
+  const [searchQuery, setSearchQuery] = useState("");
   // StrictMode(개발 모드)에서 effect가 두 번 실행돼도 요청이 중복되지 않도록
   // 한다 — 실제 운영 빌드에서는 어차피 한 번만 실행되지만, 명시적으로 막는다.
   const hasFetchedRef = useRef(false);
@@ -92,23 +110,49 @@ export default function DoctorDashboard() {
       )}
 
       {state === "success" && patients.length > 0 && (
-        <ul className="page-grid">
-          {patients.map((patient) => (
-            <li key={patient.id}>
-              <Card>
-                <p>
-                  {patient.name} ({patient.mrn})
-                </p>
-                <p>
-                  생년월일 {patient.birth_date} — {patient.assignment_role}
-                </p>
-                <LinkButton to={`/doctor/patients/${patient.id}`} variant="secondary">
-                  상세보기
-                </LinkButton>
-              </Card>
-            </li>
-          ))}
-        </ul>
+        <>
+          <FormField label="환자 이름 또는 MRN 검색" htmlFor="patient-search">
+            <input
+              id="patient-search"
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="환자 이름 또는 MRN 검색"
+            />
+          </FormField>
+
+          {(() => {
+            const filteredPatients = filterAssignedPatients(patients, searchQuery);
+            const hasQuery = searchQuery.trim() !== "";
+            return (
+              <>
+                {hasQuery && <p aria-live="polite">검색 결과 {filteredPatients.length}명</p>}
+
+                {filteredPatients.length === 0 ? (
+                  <EmptyState title="검색 조건에 맞는 담당 환자가 없습니다." />
+                ) : (
+                  <ul className="page-grid">
+                    {filteredPatients.map((patient) => (
+                      <li key={patient.id}>
+                        <Card>
+                          <p>
+                            {patient.name} ({patient.mrn})
+                          </p>
+                          <p>
+                            생년월일 {patient.birth_date} — {patient.assignment_role}
+                          </p>
+                          <LinkButton to={`/doctor/patients/${patient.id}`} variant="secondary">
+                            상세보기
+                          </LinkButton>
+                        </Card>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            );
+          })()}
+        </>
       )}
     </AppShell>
   );
