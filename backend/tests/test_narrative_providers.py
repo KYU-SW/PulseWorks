@@ -323,6 +323,60 @@ class TestBuildNarrativePrompt:
         prompt = build_narrative_prompt(snapshot)
         assert "SOME_FUTURE_DEPARTMENT" in prompt.text
 
+    # --- 실제 qwen3:8b 1회 검증(docs/validation/f4b-qwen3-8b-vitalsign-
+    # validation.md)에서 발견된 의미 수준 문제에 대한 Prompt 안전 지시 강화.
+    # Validator는 건드리지 않는다 - 이 규칙들은 전부 _INSTRUCTIONS에만
+    # 추가된다. ---
+
+    def test_tells_the_model_to_describe_vital_signs_neutrally_without_a_reference_range(self):
+        prompt = build_narrative_prompt(_full_snapshot_with_vitals())
+
+        assert "[활력징후]" in prompt.text
+        assert "참고범위나 판정이 함께 주어지지 않았으므로" in prompt.text
+
+    def test_forbids_normal_abnormal_judgment_words_for_vital_signs(self):
+        prompt = build_narrative_prompt(_full_snapshot_with_vitals())
+
+        for banned in ("정상", "비정상", "높음", "낮음", "안정적", "양호"):
+            assert banned in prompt.text  # 금지 규칙 문장 자체에 그 단어가 나열됨
+        assert "판정 표현을 붙이지 말고" in prompt.text
+
+    def test_allows_lab_result_judgments_backed_by_their_own_reference_range(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+
+        assert "[검사결과]처럼 참고범위와 판정이 함께 주어진 경우에는" in prompt.text
+        assert "설명할 수 있다" in prompt.text
+
+    def test_tells_the_model_not_to_generalize_lab_result_judgment_to_vital_signs(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+
+        assert "참고범위가 없는 [활력징후]에는 적용하지 마라" in prompt.text
+
+    def test_forbids_inferring_a_causal_link_between_lab_results_and_diagnosis(self):
+        prompt = build_narrative_prompt(_full_snapshot())
+
+        assert "[진단]은 그 기록에 있는 사실로만 설명하라" in prompt.text
+        assert "인과관계를 만들지 말고" in prompt.text
+        for phrase in ("이에 따라", "그 결과", "때문에 진단되었습니다"):
+            assert phrase in prompt.text  # 금지 예시 문구 자체가 지시문에 나열됨
+
+    def test_still_forbids_treatment_and_medication_change_instructions(self):
+        # 회귀 확인: 이번에 추가한 규칙이 기존 금지 목록을 밀어내지 않았는지.
+        prompt = build_narrative_prompt(_full_snapshot())
+
+        assert "약물 추가·변경·중단 지시" in prompt.text
+        assert "새로운 진단 확정" in prompt.text
+
+    def test_still_never_includes_patient_identifying_fields(self):
+        # Task 19 설계 확정사항(최소 입력 데이터) 회귀 확인 - 이번 변경이
+        # 환자 식별정보 제외 원칙을 건드리지 않았는지.
+        snapshot = _full_snapshot_with_vitals()
+        prompt = build_narrative_prompt(snapshot)
+
+        assert snapshot.patient.mrn not in prompt.text
+        assert snapshot.patient.name not in prompt.text
+        assert str(snapshot.patient.birth_date) not in prompt.text
+
 
 # ============================== DeterministicMockProvider ===================
 
