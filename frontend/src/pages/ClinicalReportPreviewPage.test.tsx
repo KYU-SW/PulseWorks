@@ -908,6 +908,110 @@ describe("ClinicalReportPreviewPage", () => {
     expect(screen.getByRole("button", { name: "승인" })).toBeInTheDocument();
   });
 
+  // ==================== UX-1E: Approval Checklist ====================
+
+  it("shows an unchecked self-attestation checkbox when approve confirmation opens", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.click(screen.getByRole("button", { name: "승인" }));
+
+    const checkbox = screen.getByLabelText("보고서 내용과 근거 데이터를 직접 확인했습니다.");
+    expect(checkbox).toBeInTheDocument();
+    expect(checkbox).not.toBeChecked();
+  });
+
+  it("disables the final approve button until the checkbox is checked, and re-disables it if unchecked", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.click(screen.getByRole("button", { name: "승인" }));
+    const confirmButton = screen.getByRole("button", { name: "승인 확정" });
+    const checkbox = screen.getByLabelText("보고서 내용과 근거 데이터를 직접 확인했습니다.");
+
+    expect(confirmButton).toBeDisabled();
+
+    await user.click(checkbox);
+    expect(confirmButton).toBeEnabled();
+
+    await user.click(checkbox);
+    expect(confirmButton).toBeDisabled();
+  });
+
+  it("resets the checkbox to unchecked after cancelling and reopening the approve confirmation", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.click(screen.getByRole("button", { name: "승인" }));
+    await user.click(screen.getByLabelText("보고서 내용과 근거 데이터를 직접 확인했습니다."));
+    await user.click(screen.getByRole("button", { name: "취소" }));
+
+    await user.click(screen.getByRole("button", { name: "승인" }));
+    const checkbox = screen.getByLabelText("보고서 내용과 근거 데이터를 직접 확인했습니다.");
+    expect(checkbox).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "승인 확정" })).toBeDisabled();
+  });
+
+  it("does not show any approval checkbox in the reject confirmation", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal("fetch", mockFetchOnce(200, SAMPLE_REPORT));
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.click(screen.getByRole("button", { name: "반려" }));
+
+    expect(screen.getByText("정말 반려하시겠습니까?")).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("보고서 내용과 근거 데이터를 직접 확인했습니다.")
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the final approve button disabled while the request is in flight even though it is checked", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    const withNarrative = {
+      ...SAMPLE_REPORT,
+      content: { ...SAMPLE_REPORT.content, narrative: "설명문 있음" },
+    };
+    const controls: { resolve: (value: unknown) => void } = { resolve: () => {} };
+    const fetchMock = vi.fn().mockImplementation((url: unknown, options?: RequestInit) => {
+      const isApprovePost = options?.method === "POST" && String(url).includes("/approve");
+      if (isApprovePost) {
+        return new Promise((resolve) => {
+          controls.resolve = resolve;
+        });
+      }
+      return Promise.resolve({
+        ok: true, status: 200, json: async () => withNarrative, text: async () => JSON.stringify(withNarrative),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPreviewPage();
+    const user = userEvent.setup();
+
+    await screen.findByText("진료참고 보고서");
+    await user.click(screen.getByRole("button", { name: "승인" }));
+    await user.click(screen.getByLabelText("보고서 내용과 근거 데이터를 직접 확인했습니다."));
+    await user.click(screen.getByRole("button", { name: "승인 확정" }));
+
+    expect(screen.getByRole("button", { name: "승인하는 중..." })).toBeDisabled();
+    controls.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...withNarrative, status: "APPROVED", reviewed_by_user_id: 1 }),
+      text: async () => "",
+    });
+  });
+
   it("approves after confirmation and updates the page without a full reload", async () => {
     setStoredToken(makeFakeJwt("DOCTOR"));
     const withNarrative = {
@@ -928,6 +1032,8 @@ describe("ClinicalReportPreviewPage", () => {
 
     await screen.findByText("진료참고 보고서");
     await user.click(screen.getByRole("button", { name: "승인" }));
+    // UX-1E: 최종 승인 확정 전에 self-attestation checkbox를 체크해야 한다.
+    await user.click(screen.getByLabelText("보고서 내용과 근거 데이터를 직접 확인했습니다."));
     await user.click(screen.getByRole("button", { name: "승인 확정" }));
 
     // Task 20B: 보고서 상태 표시를 StatusBadge로 통일하며 문구도
@@ -957,6 +1063,8 @@ describe("ClinicalReportPreviewPage", () => {
 
     await screen.findByText("진료참고 보고서");
     await user.click(screen.getByRole("button", { name: "승인" }));
+    // UX-1E: 최종 승인 확정 전에 self-attestation checkbox를 체크해야 한다.
+    await user.click(screen.getByLabelText("보고서 내용과 근거 데이터를 직접 확인했습니다."));
     await user.click(screen.getByRole("button", { name: "승인 확정" }));
 
     const alert = await screen.findByRole("alert");

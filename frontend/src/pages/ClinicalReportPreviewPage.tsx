@@ -151,6 +151,11 @@ export default function ClinicalReportPreviewPage() {
   const [approveStep, setApproveStep] = useState<ConfirmStep>("idle");
   const [isApproving, setIsApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
+  // UX-1E: 자동 임상 검증이 아니라 "의료진이 보고서 내용과 근거 데이터를
+  // 직접 확인했다"는 self-attestation이다. Backend approve API payload에는
+  // 넣지 않는다(Frontend confirmation guard일 뿐) - 승인 확인 단계를
+  // 열 때마다/취소·성공·실패 시마다 false로 되돌린다.
+  const [hasReviewedReport, setHasReviewedReport] = useState(false);
 
   const [rejectStep, setRejectStep] = useState<ConfirmStep>("idle");
   const [isRejecting, setIsRejecting] = useState(false);
@@ -307,13 +312,16 @@ export default function ClinicalReportPreviewPage() {
   }
 
   async function handleApproveConfirmed() {
-    if (!report || isApproving) return; // 중복 요청 방지
+    // hasReviewedReport는 이미 버튼의 disabled 조건이지만, 다른
+    // 핸들러들과 동일한 방어적 관례를 따라 여기서도 다시 확인한다.
+    if (!report || isApproving || !hasReviewedReport) return; // 중복 요청 방지
     setApproveError(null);
     setIsApproving(true);
     try {
       const updated = await approveClinicalReport(report.id);
       setReport(updated);
       setApproveStep("idle");
+      setHasReviewedReport(false);
       setSaveSucceeded(false); // APPROVED가 되면 저장 편집 영역 자체가 사라지므로 상태도 정리한다.
       setNarrativeSucceeded(false);
     } catch (err) {
@@ -326,6 +334,7 @@ export default function ClinicalReportPreviewPage() {
         setApproveError(GENERIC_APPROVE_ERROR);
       }
       setApproveStep("idle");
+      setHasReviewedReport(false);
     } finally {
       setIsApproving(false);
     }
@@ -551,7 +560,10 @@ export default function ClinicalReportPreviewPage() {
               {approveStep === "idle" && (
                 <Button
                   variant="primary"
-                  onClick={() => setApproveStep("confirming")}
+                  onClick={() => {
+                    setHasReviewedReport(false);
+                    setApproveStep("confirming");
+                  }}
                   disabled={anyActionInFlight}
                 >
                   승인
@@ -560,17 +572,29 @@ export default function ClinicalReportPreviewPage() {
               {approveStep === "confirming" && (
                 <div role="group" aria-label="승인 확인">
                   <p>정말 승인하시겠습니까?</p>
+                  <p>이 보고서를 승인하면 환자가 확인할 수 있습니다.</p>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={hasReviewedReport}
+                      onChange={(e) => setHasReviewedReport(e.target.checked)}
+                    />{" "}
+                    보고서 내용과 근거 데이터를 직접 확인했습니다.
+                  </label>
                   <Button
                     variant="primary"
                     onClick={handleApproveConfirmed}
-                    disabled={isApproving}
+                    disabled={isApproving || !hasReviewedReport}
                     loading={isApproving}
                   >
                     {isApproving ? "승인하는 중..." : "승인 확정"}
                   </Button>
                   <Button
                     variant="secondary"
-                    onClick={() => setApproveStep("idle")}
+                    onClick={() => {
+                      setApproveStep("idle");
+                      setHasReviewedReport(false);
+                    }}
                     disabled={isApproving}
                   >
                     취소
