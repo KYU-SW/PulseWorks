@@ -5,13 +5,13 @@ import { SectionComponentProps } from "./sectionProps";
 import AllergiesSection from "./sections/AllergiesSection";
 import ClinicalNotesSection from "./sections/ClinicalNotesSection";
 import DiagnosesSection from "./sections/DiagnosesSection";
+import EvidenceSection from "./sections/EvidenceSection";
 import LabResultsTableSection from "./sections/LabResultsTableSection";
 import LabTrendsSection from "./sections/LabTrendsSection";
 import PatientInfoSection from "./sections/PatientInfoSection";
 import PrescriptionsSection from "./sections/PrescriptionsSection";
 import SafetyAlertsSection from "./sections/SafetyAlertsSection";
 import SelectedEncounterSection from "./sections/SelectedEncounterSection";
-import SourceRecordIdsSection from "./sections/SourceRecordIdsSection";
 import VitalSignsSection from "./sections/VitalSignsSection";
 
 // section id와 React 컴포넌트의 유일한 연결점. 새 진료과가 생겨도 이
@@ -28,7 +28,7 @@ const SECTION_COMPONENTS: Record<ReportSectionId, React.ComponentType<SectionCom
   allergies: AllergiesSection,
   safety_alerts: SafetyAlertsSection,
   clinical_notes: ClinicalNotesSection,
-  source_record_ids: SourceRecordIdsSection,
+  source_record_ids: EvidenceSection,
 };
 
 /**

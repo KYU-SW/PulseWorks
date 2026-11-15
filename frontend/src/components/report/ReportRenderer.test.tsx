@@ -158,15 +158,22 @@ it("shows a factual empty state for allergies and safety_alerts when empty", () 
   expect(screen.getByRole("heading", { name: "안전 알림" })).toBeInTheDocument();
 });
 
-// 14~19. 비면 숨김: diagnoses/lab_trends/lab_results/prescriptions/clinical_notes/source_record_ids
-it("hides diagnoses, lab_trends, lab_results, prescriptions, clinical_notes, and source_record_ids when empty", () => {
+// 14~18. 비면 숨김: diagnoses/lab_trends/lab_results/prescriptions/clinical_notes
+it("hides diagnoses, lab_trends, lab_results, prescriptions, and clinical_notes when empty", () => {
+  // UX-1D: "근거 기록"(EvidenceSection)은 더 이상 source_record_ids를
+  // source로 쓰지 않고 vital_signs/lab_results/diagnoses 존재 여부로
+  // 표시 여부를 결정한다. 이 fixture는 vital_signs를 비우지 않으므로
+  // (baseSnapshot 기본값 유지) "근거 기록"은 실제 활력징후 근거가 있어
+  // 정당하게 계속 표시된다 - 그 경우는 별도로
+  // EvidenceSection.test.tsx의 "renders nothing when every evidence
+  // category is empty" 테스트가 정확히 덮는다.
   const content = contentFor({
     diagnoses: [], lab_trends: [], lab_results: [], prescriptions: [],
     clinical_notes: [], source_record_ids: [],
   });
   render(<ReportRenderer content={content} />);
   const headings = headingTexts();
-  for (const hidden of ["주요 진단", "검사 추세", "검사결과", "처방 기록", "진료기록 미리보기", "근거 기록"]) {
+  for (const hidden of ["주요 진단", "검사 추세", "검사결과", "처방 기록", "진료기록 미리보기"]) {
     expect(headings).not.toContain(hidden);
   }
   // 항상 표시되는 섹션은 그대로 남아 있어야 한다
@@ -207,8 +214,12 @@ it("never renders an img element", () => {
 // Task F4-B: VitalSign이 있으면 "활력징후" 섹션이 보이고, 없으면 숨는다.
 it("shows the vital_signs section with formatted blood pressure when vital signs exist", () => {
   render(<ReportRenderer content={contentFor()} />);
-  expect(screen.getByRole("heading", { name: "활력징후" })).toBeInTheDocument();
-  expect(screen.getByText(/120\/80\s*mmHg/)).toBeInTheDocument();
+  // UX-1D: "활력징후"/"120/80 mmHg"가 신규 EvidenceSection(근거 기록)
+  // 안에도 나타나므로, 실제 VitalSignsSection region으로 범위를 좁혀
+  // 확인한다(level:2 heading이 그 region의 접근 가능한 이름이 된다).
+  const vitalSignsSection = screen.getByRole("region", { name: "활력징후" });
+  expect(within(vitalSignsSection).getByRole("heading", { level: 2, name: "활력징후" })).toBeInTheDocument();
+  expect(within(vitalSignsSection).getByText(/120\/80\s*mmHg/)).toBeInTheDocument();
 });
 
 it("hides the vital_signs section when there are no vital signs", () => {
