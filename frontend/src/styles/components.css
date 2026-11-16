@@ -607,11 +607,6 @@ dialog::backdrop {
   line-height: 1.8;
 }
 
-.timeline-item--report .timeline-item__type {
-  background-color: var(--color-brand-subtle);
-  color: var(--color-brand-active);
-}
-
 .timeline-item__title {
   font-weight: 600;
   color: var(--color-text);

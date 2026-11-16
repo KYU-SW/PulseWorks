@@ -5,8 +5,6 @@ from app.core.db import get_db
 from app.core.deps import require_roles
 from app.models import (
     ClinicalNote,
-    ClinicalReport,
-    ClinicalReportStatus,
     Department,
     Diagnosis,
     Encounter,
@@ -205,44 +203,6 @@ def get_patient_timeline(
                     department=department_label,
                 )
             )
-
-        # UX-2C: ClinicalReport lifecycle event — DB 변경 없이 ClinicalReport
-        # 도메인 timestamp(reviewed_at)만 source로 쓴다. AuditLog는 쓰지 않는다.
-        # 임상 타임라인에는 공식 상태 전이(승인/반려)만 올린다 - 생성/수정은
-        # 문서 작업 이력이라 올리지 않는다(created_at/last_modified_at/AuditLog는
-        # 그대로 보존되고 보고서 목록에서 확인할 수 있다). narrative/content는
-        # 절대 읽지 않는다 - 제목/요약 문구는 상태 전이만 말하는 고정 문자열이다.
-        for report in (
-            db.query(ClinicalReport).filter(ClinicalReport.encounter_id.in_(encounter_ids)).all()
-        ):
-            department_label = _DEPARTMENT_LABELS[department_by_encounter_id[report.encounter_id]]
-
-            if report.status == ClinicalReportStatus.APPROVED and report.reviewed_at is not None:
-                items.append(
-                    TimelineItemOut(
-                        id=report.id,
-                        encounter_id=report.encounter_id,
-                        event_type="REPORT_APPROVED",
-                        event_time=report.reviewed_at,
-                        title="진료 보고서 승인",
-                        summary="검토가 완료되어 승인되었습니다.",
-                        source_type=None,
-                        department=department_label,
-                    )
-                )
-            elif report.status == ClinicalReportStatus.REJECTED and report.reviewed_at is not None:
-                items.append(
-                    TimelineItemOut(
-                        id=report.id,
-                        encounter_id=report.encounter_id,
-                        event_type="REPORT_REJECTED",
-                        event_time=report.reviewed_at,
-                        title="진료 보고서 반려",
-                        summary="검토가 완료되어 반려되었습니다.",
-                        source_type=None,
-                        department=department_label,
-                    )
-                )
 
         for note in (
             db.query(ClinicalNote).filter(ClinicalNote.encounter_id.in_(encounter_ids)).all()

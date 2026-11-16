@@ -6,11 +6,9 @@ export type TimelineEventType =
   | "LAB_RESULT"
   | "PRESCRIPTION"
   | "CLINICAL_NOTE"
-  | "VITAL_SIGN" // Task F4-A
-  // UX-2C: ClinicalReport 공식 상태 전이(승인/반려)만 — narrative/content는
-  // 절대 포함하지 않는다. 생성/수정은 임상 타임라인에 오지 않는다.
-  | "REPORT_APPROVED"
-  | "REPORT_REJECTED";
+  | "VITAL_SIGN"; // Task F4-A
+// 임상 타임라인은 임상 사건만 다룬다 — ClinicalReport lifecycle(생성/수정/
+// 승인/반려)은 오지 않으며 "진료 보고서" 목록에서 확인한다.
 
 export type TimelinePatient = {
   id: number;

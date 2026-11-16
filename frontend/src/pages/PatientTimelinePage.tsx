@@ -38,9 +38,6 @@ const EVENT_TYPE_LABELS: Record<TimelineEventType, string> = {
   PRESCRIPTION: "처방",
   CLINICAL_NOTE: "진료기록",
   VITAL_SIGN: "활력징후", // Task F4-A
-  // UX-2C
-  REPORT_APPROVED: "진료 보고서 승인",
-  REPORT_REJECTED: "진료 보고서 반려",
 };
 
 const SOURCE_TYPE_LABELS: Record<string, string> = {
@@ -216,12 +213,8 @@ export default function PatientTimelinePage() {
               <ul className="timeline-list">
                 {data.timeline.map((item) => {
                   const isCreating = creatingEncounterIds.has(item.encounter_id);
-                  const isReportEvent = item.event_type.startsWith("REPORT_");
                   return (
-                    <li
-                      key={`${item.event_type}-${item.id}`}
-                      className={isReportEvent ? "timeline-item timeline-item--report" : "timeline-item"}
-                    >
+                    <li key={`${item.event_type}-${item.id}`} className="timeline-item">
                       <time className="timeline-item__time" dateTime={item.event_time}>
                         {new Date(item.event_time).toLocaleString()}
                       </time>

@@ -602,99 +602,134 @@ describe("PatientTimelinePage", () => {
     ).toBeInTheDocument();
   });
 
-  // ==================== UX-2C: Report Lifecycle Timeline ====================
-  // 임상 타임라인 계약: 보고서 lifecycle은 공식 상태 전이(승인/반려)만 온다.
-  // 생성/수정(REPORT_CREATED/REPORT_UPDATED)은 더 이상 타임라인 응답에 없다.
+  // ==================== Clinical-only Timeline ====================
+  // 임상 타임라인 계약: 환자에게 발생한 임상 사건만 온다. ClinicalReport
+  // lifecycle(생성/수정/승인/반려)은 타임라인에 오지 않고 "진료 보고서" 목록이
+  // 담당한다. "이 방문으로 진료참고 보고서 생성"은 lifecycle 이벤트가 아니라
+  // 방문에서 새 보고서를 만드는 사용자 action이므로 계속 제공된다.
 
-  const TIMELINE_WITH_REPORT_EVENTS = {
+  const CLINICAL_ONLY_TIMELINE = {
     patient: SAMPLE_TIMELINE.patient,
     timeline: [
-      ...SAMPLE_TIMELINE.timeline,
       {
-        id: 101,
+        id: 21,
         encounter_id: 1,
-        event_type: "REPORT_REJECTED",
-        event_time: "2026-03-11T09:00:00+00:00",
-        title: "진료 보고서 반려",
-        summary: "검토가 완료되어 반려되었습니다.",
-        source_type: null,
+        event_type: "CLINICAL_NOTE",
+        event_time: "2026-03-10T11:00:00+00:00",
+        title: "외래 경과기록",
+        summary: "합성 경과기록 요약",
+        source_type: "INSTITUTION_GENERATED",
         department: "내분비내과",
       },
       {
-        id: 100,
+        id: 22,
         encounter_id: 1,
-        event_type: "REPORT_APPROVED",
-        event_time: "2026-03-12T09:00:00+00:00",
-        title: "진료 보고서 승인",
-        summary: "검토가 완료되어 승인되었습니다.",
+        event_type: "PRESCRIPTION",
+        event_time: "2026-03-10T10:30:00+00:00",
+        title: "Metformin",
+        summary: "용량: 500 mg",
+        source_type: "INSTITUTION_GENERATED",
+        department: "내분비내과",
+      },
+      {
+        id: 23,
+        encounter_id: 1,
+        event_type: "DIAGNOSIS",
+        event_time: "2026-03-10T10:00:00+00:00",
+        title: "2형 당뇨병",
+        summary: "진단 코드: E11.9",
+        source_type: "INSTITUTION_GENERATED",
+        department: "내분비내과",
+      },
+      {
+        id: 24,
+        encounter_id: 1,
+        event_type: "LAB_RESULT",
+        event_time: "2026-03-10T09:40:00+00:00",
+        title: "HbA1c",
+        summary: "8.1% (참고범위 4.0-6.0%)",
+        source_type: "INSTITUTION_GENERATED",
+        department: "내분비내과",
+      },
+      {
+        id: 25,
+        encounter_id: 1,
+        event_type: "VITAL_SIGN",
+        event_time: "2026-03-10T09:20:00+00:00",
+        title: "체온",
+        summary: "36.5℃",
+        source_type: "INSTITUTION_GENERATED",
+        department: "내분비내과",
+        vital_type: "BODY_TEMPERATURE",
+        value: "36.5",
+        value_secondary: null,
+        unit: "Cel",
+        quality_warnings: [],
+      },
+      {
+        id: 1,
+        encounter_id: 1,
+        event_type: "ENCOUNTER",
+        event_time: "2026-03-10T09:00:00+00:00",
+        title: "내분비내과 외래 방문",
+        summary: "내분비내과 외래 방문 (합성 데이터)",
         source_type: null,
         department: "내분비내과",
       },
     ],
   };
 
-  it("renders approved and rejected report status transitions with Korean labels", async () => {
+  function renderClinicalOnlyTimeline() {
     setStoredToken(makeFakeJwt("DOCTOR"));
     vi.stubGlobal(
       "fetch",
-      mockFetchRouter({ "/timeline": { status: 200, body: TIMELINE_WITH_REPORT_EVENTS } })
+      mockFetchRouter({ "/timeline": { status: 200, body: CLINICAL_ONLY_TIMELINE } })
     );
     renderTimelinePage();
+  }
+
+  it("shows every clinical event type in the clinical timeline", async () => {
+    renderClinicalOnlyTimeline();
 
     await screen.findByText("합성환자-내분비01");
     const flatTimeline = within(screen.getByRole("region", { name: "임상 타임라인" }));
-    expect(flatTimeline.getAllByText("진료 보고서 승인").length).toBeGreaterThan(0);
-    expect(flatTimeline.getAllByText("진료 보고서 반려").length).toBeGreaterThan(0);
-    expect(flatTimeline.queryByText("진료 보고서 생성")).not.toBeInTheDocument();
-    expect(flatTimeline.queryByText("진료 보고서 수정")).not.toBeInTheDocument();
+    for (const label of ["방문", "활력징후", "검사결과", "진단", "처방", "진료기록"]) {
+      expect(flatTimeline.getByText(label)).toBeInTheDocument();
+    }
   });
 
-  it("keeps clinical events, encounter summary, and report generation action alongside report status events", async () => {
-    setStoredToken(makeFakeJwt("DOCTOR"));
-    vi.stubGlobal(
-      "fetch",
-      mockFetchRouter({ "/timeline": { status: 200, body: TIMELINE_WITH_REPORT_EVENTS } })
-    );
-    renderTimelinePage();
+  it("shows no clinical report lifecycle labels in the clinical timeline", async () => {
+    renderClinicalOnlyTimeline();
 
     await screen.findByText("합성환자-내분비01");
     const flatTimeline = within(screen.getByRole("region", { name: "임상 타임라인" }));
-    expect(flatTimeline.getByText("방문")).toBeInTheDocument();
-    expect(flatTimeline.getByText("검사결과")).toBeInTheDocument();
+    for (const label of [
+      "진료 보고서 생성",
+      "진료 보고서 수정",
+      "진료 보고서 승인",
+      "진료 보고서 반려",
+    ]) {
+      expect(flatTimeline.queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+
+  it("keeps the encounter summary and the report generation action for each visit", async () => {
+    renderClinicalOnlyTimeline();
+
+    await screen.findByText("합성환자-내분비01");
     expect(screen.getByRole("heading", { name: "Encounter 요약" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "이 방문으로 진료참고 보고서 생성" })
     ).toBeInTheDocument();
   });
 
-  it("renders timeline items in the order returned by the server", async () => {
-    setStoredToken(makeFakeJwt("DOCTOR"));
-    vi.stubGlobal(
-      "fetch",
-      mockFetchRouter({ "/timeline": { status: 200, body: TIMELINE_WITH_REPORT_EVENTS } })
-    );
-    renderTimelinePage();
+  it("renders clinical timeline items in the order returned by the server", async () => {
+    renderClinicalOnlyTimeline();
 
     await screen.findByText("합성환자-내분비01");
-    const flatTimeline = screen.getByRole("region", { name: "임상 타임라인" });
-    const renderedText = flatTimeline.textContent ?? "";
-    const rejectedAt = renderedText.indexOf("진료 보고서 반려");
-    const approvedAt = renderedText.indexOf("진료 보고서 승인");
-    expect(rejectedAt).toBeGreaterThan(-1);
-    expect(approvedAt).toBeGreaterThan(rejectedAt);
-  });
-
-  it("does not display the internal numeric report id as visible text", async () => {
-    setStoredToken(makeFakeJwt("DOCTOR"));
-    vi.stubGlobal(
-      "fetch",
-      mockFetchRouter({ "/timeline": { status: 200, body: TIMELINE_WITH_REPORT_EVENTS } })
-    );
-    renderTimelinePage();
-
-    await screen.findByText("합성환자-내분비01");
-    const flatTimeline = within(screen.getByRole("region", { name: "임상 타임라인" }));
-    expect(flatTimeline.queryByText("100")).not.toBeInTheDocument();
-    expect(flatTimeline.queryByText(/#100/)).not.toBeInTheDocument();
+    const renderedText = screen.getByRole("region", { name: "임상 타임라인" }).textContent ?? "";
+    const positions = ["진료기록", "처방", "진단"].map((label) => renderedText.indexOf(label));
+    expect(positions.every((position) => position > -1)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 });
