@@ -206,46 +206,16 @@ def get_patient_timeline(
                 )
             )
 
-        # UX-2C: ClinicalReport lifecycle event — DB 변경 없이 이미 존재하는
-        # ClinicalReport 도메인 timestamp(created_at/reviewed_at/
-        # last_modified_at)만 1차 source로 쓴다. AuditLog는 쓰지 않는다
-        # (동일 사건을 두 번 타임라인에 올리지 않기 위함). narrative/
-        # content는 절대 읽지 않는다 - 제목/요약 문구는 상태 전이만
-        # 말하는 고정 문자열이다.
+        # UX-2C: ClinicalReport lifecycle event — DB 변경 없이 ClinicalReport
+        # 도메인 timestamp(reviewed_at)만 source로 쓴다. AuditLog는 쓰지 않는다.
+        # 임상 타임라인에는 공식 상태 전이(승인/반려)만 올린다 - 생성/수정은
+        # 문서 작업 이력이라 올리지 않는다(created_at/last_modified_at/AuditLog는
+        # 그대로 보존되고 보고서 목록에서 확인할 수 있다). narrative/content는
+        # 절대 읽지 않는다 - 제목/요약 문구는 상태 전이만 말하는 고정 문자열이다.
         for report in (
             db.query(ClinicalReport).filter(ClinicalReport.encounter_id.in_(encounter_ids)).all()
         ):
             department_label = _DEPARTMENT_LABELS[department_by_encounter_id[report.encounter_id]]
-            items.append(
-                TimelineItemOut(
-                    id=report.id,
-                    encounter_id=report.encounter_id,
-                    event_type="REPORT_CREATED",
-                    event_time=report.created_at,
-                    title="진료 보고서 생성",
-                    summary="보고서 초안이 생성되었습니다.",
-                    source_type=None,
-                    department=department_label,
-                )
-            )
-
-            # last_modified_at은 PATCH(서술형 필드 수정)마다 갱신되므로,
-            # 생성 시점과 다를 때만 "수정" 이벤트를 추가한다 - 그렇지
-            # 않으면 매 보고서마다 생성 이벤트와 완전히 동일한 시각의
-            # 중복 수정 이벤트가 생긴다.
-            if report.last_modified_at != report.created_at:
-                items.append(
-                    TimelineItemOut(
-                        id=report.id,
-                        encounter_id=report.encounter_id,
-                        event_type="REPORT_UPDATED",
-                        event_time=report.last_modified_at,
-                        title="진료 보고서 수정",
-                        summary="보고서 내용이 수정되었습니다.",
-                        source_type=None,
-                        department=department_label,
-                    )
-                )
 
             if report.status == ClinicalReportStatus.APPROVED and report.reviewed_at is not None:
                 items.append(
