@@ -76,12 +76,17 @@ interface EncounterSummaryCardProps {
 // (§14 최소 안전 범위 - 기존 flat Timeline에서만 계속 제공).
 export default function EncounterSummaryCard({ summary }: EncounterSummaryCardProps) {
   const { encounterItem, vitalSigns, labResults, diagnoses } = summary;
-  const headerTitle = `${new Date(encounterItem.event_time).toLocaleString()} · ${encounterItem.department} · ${encounterItem.title}`;
+  // 카드 header 위계: 날짜(heading) → 진료과·방문 유형(보조 문구).
+  // 표시하는 값과 순서는 기존과 같다.
+  const headerTitle = new Date(encounterItem.event_time).toLocaleString();
+  const headerContext = `${encounterItem.department} · ${encounterItem.title}`;
 
   return (
-    <SectionCard title={headerTitle} headingLevel={3}>
+    <SectionCard title={headerTitle} headingLevel={3} className="encounter-summary-card">
+      <p className="encounter-summary-card__context">{headerContext}</p>
+
       {vitalSigns.length > 0 && (
-        <div>
+        <div className="encounter-summary-card__group">
           <h4>활력징후</h4>
           <ul>
             {vitalSigns.map((item) => (
@@ -92,7 +97,7 @@ export default function EncounterSummaryCard({ summary }: EncounterSummaryCardPr
       )}
 
       {labResults.length > 0 && (
-        <div>
+        <div className="encounter-summary-card__group">
           <h4>검사결과</h4>
           <ul>
             {labResults.map((item) => (
@@ -105,7 +110,7 @@ export default function EncounterSummaryCard({ summary }: EncounterSummaryCardPr
       )}
 
       {diagnoses.length > 0 && (
-        <div>
+        <div className="encounter-summary-card__group">
           <h4>진단</h4>
           <ul>
             {diagnoses.map((item) => (

@@ -108,7 +108,7 @@ export default function PatientReportsPage() {
         <ul className="page-grid">
           {reports.map((report) => (
             <li key={report.id}>
-              <Card>
+              <Card className="patient-report-card">
                 <LinkButton to={`/patient/reports/${report.id}`} variant="ghost">
                   {formatDate(report.encounter_date)}{" "}
                   {DEPARTMENT_LABELS[report.department] ?? report.department}{" "}

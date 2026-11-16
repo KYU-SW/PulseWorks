@@ -17,6 +17,12 @@ import FormField from "../components/ui/FormField";
 
 type LoadState = "loading" | "success" | "forbidden" | "error";
 
+// 담당 역할 enum을 화면용 한글 라벨로만 바꾼다(알 수 없는 값은 원문 그대로).
+const ASSIGNMENT_ROLE_LABELS: Record<string, string> = {
+  ATTENDING_PHYSICIAN: "주치의",
+  PRIMARY_NURSE: "담당 간호사",
+};
+
 // UX-1A: 이미 authorization을 거쳐 내려온 담당 환자 목록만 대상으로 하는
 // client-side 검색이다 — 서버에 쿼리를 보내지 않으므로 권한 범위를 넘지
 // 않는다. 이름/MRN 부분 일치, 대소문자 무시, 양끝 공백 무시만 한다(오타
@@ -88,7 +94,7 @@ export default function DoctorDashboard() {
       }
     >
       <PageHeader title="의료진 대시보드" description={`로그인 역할: ${role}`} />
-      <p>이 화면의 모든 환자 데이터는 합성(가짜) 교육용 데이터입니다.</p>
+      <p className="page-note">이 화면의 모든 환자 데이터는 합성(가짜) 교육용 데이터입니다.</p>
 
       {state === "loading" && <LoadingState label="담당 환자 목록을 불러오는 중..." />}
 
@@ -111,22 +117,28 @@ export default function DoctorDashboard() {
 
       {state === "success" && patients.length > 0 && (
         <>
-          <FormField label="환자 이름 또는 MRN 검색" htmlFor="patient-search">
-            <input
-              id="patient-search"
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="환자 이름 또는 MRN 검색"
-            />
-          </FormField>
+          <Card className="patient-search">
+            <FormField label="환자 이름 또는 MRN 검색" htmlFor="patient-search">
+              <input
+                id="patient-search"
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="환자 이름 또는 MRN 검색"
+              />
+            </FormField>
+          </Card>
 
           {(() => {
             const filteredPatients = filterAssignedPatients(patients, searchQuery);
             const hasQuery = searchQuery.trim() !== "";
             return (
               <>
-                {hasQuery && <p aria-live="polite">검색 결과 {filteredPatients.length}명</p>}
+                {hasQuery && (
+                  <p className="search-result-count" aria-live="polite">
+                    검색 결과 {filteredPatients.length}명
+                  </p>
+                )}
 
                 {filteredPatients.length === 0 ? (
                   <EmptyState title="검색 조건에 맞는 담당 환자가 없습니다." />
@@ -134,16 +146,18 @@ export default function DoctorDashboard() {
                   <ul className="page-grid">
                     {filteredPatients.map((patient) => (
                       <li key={patient.id}>
-                        <Card>
-                          <p>
-                            {patient.name} ({patient.mrn})
+                        <Card className="patient-card">
+                          <p className="patient-card__name">{patient.name}</p>
+                          <p className="patient-card__mrn">MRN {patient.mrn}</p>
+                          <p className="patient-card__meta">
+                            생년월일 {patient.birth_date} ·{" "}
+                            {ASSIGNMENT_ROLE_LABELS[patient.assignment_role] ?? patient.assignment_role}
                           </p>
-                          <p>
-                            생년월일 {patient.birth_date} — {patient.assignment_role}
-                          </p>
-                          <LinkButton to={`/doctor/patients/${patient.id}`} variant="secondary">
-                            상세보기
-                          </LinkButton>
+                          <div className="patient-card__action">
+                            <LinkButton to={`/doctor/patients/${patient.id}`} variant="secondary">
+                              상세보기
+                            </LinkButton>
+                          </div>
                         </Card>
                       </li>
                     ))}

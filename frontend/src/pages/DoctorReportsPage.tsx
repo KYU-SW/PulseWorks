@@ -21,6 +21,7 @@ import LoadingState from "../components/ui/LoadingState";
 import EmptyState from "../components/ui/EmptyState";
 import ErrorState from "../components/ui/ErrorState";
 import AlertBox from "../components/ui/AlertBox";
+import Card from "../components/ui/Card";
 
 type LoadState = "loading" | "success" | "forbidden" | "error";
 
@@ -105,7 +106,8 @@ export default function DoctorReportsPage() {
     >
       <PageHeader title="진료 보고서" description="담당 환자의 진료참고 보고서 목록입니다." />
 
-      <div className="page-stack">
+      {/* 상태·기간 필터와 초기화를 하나의 toolbar로 묶는다(동작은 그대로). */}
+      <Card className="filter-toolbar">
         <FormField label="상태" htmlFor="report-status-filter">
           <select
             id="report-status-filter"
@@ -146,10 +148,12 @@ export default function DoctorReportsPage() {
           />
         </FormField>
 
-        <Button variant="secondary" onClick={resetFilters}>
-          필터 초기화
-        </Button>
-      </div>
+        <div className="filter-toolbar__actions">
+          <Button variant="secondary" onClick={resetFilters}>
+            필터 초기화
+          </Button>
+        </div>
+      </Card>
 
       {state === "loading" && <LoadingState label="진료 보고서 목록을 불러오는 중..." />}
 
@@ -177,7 +181,7 @@ export default function DoctorReportsPage() {
       )}
 
       {state === "success" && data && data.items.length > 0 && (
-        <>
+        <Card className="table-card">
           <DataTable label="진료 보고서 목록">
             <table>
               <thead>
@@ -188,21 +192,25 @@ export default function DoctorReportsPage() {
                   <th scope="col">상태</th>
                   <th scope="col">생성일</th>
                   <th scope="col">승인일</th>
-                  <th scope="col">액션</th>
+                  <th scope="col" className="cell-action">액션</th>
                 </tr>
               </thead>
               <tbody>
                 {data.items.map((item: ClinicalReportListItem) => (
                   <tr key={item.id}>
-                    <td>{`${item.patient_name} (${item.patient_mrn})`}</td>
-                    <td>{item.encounter_id !== null ? `#${item.encounter_id}` : "-"}</td>
+                    <td className="cell-primary">{`${item.patient_name} (${item.patient_mrn})`}</td>
+                    <td className="cell-muted cell-numeric">
+                      {item.encounter_id !== null ? `#${item.encounter_id}` : "-"}
+                    </td>
                     <td>{REPORT_TYPE_LABELS[item.report_type] ?? item.report_type}</td>
                     <td>
                       <StatusBadge kind="report" status={item.status} />
                     </td>
-                    <td>{formatDateTime(item.created_at)}</td>
-                    <td>{item.reviewed_at ? formatDateTime(item.reviewed_at) : "-"}</td>
-                    <td>
+                    <td className="cell-nowrap">{formatDateTime(item.created_at)}</td>
+                    <td className="cell-nowrap cell-muted">
+                      {item.reviewed_at ? formatDateTime(item.reviewed_at) : "-"}
+                    </td>
+                    <td className="cell-action">
                       <LinkButton to={`/doctor/reports/${item.id}`} variant="ghost">
                         보기
                       </LinkButton>
@@ -213,7 +221,8 @@ export default function DoctorReportsPage() {
             </table>
           </DataTable>
 
-          <div className="page-grid">
+          {/* 표 footer 형태의 페이지 이동(이전/다음 동작은 그대로). */}
+          <nav className="pagination" aria-label="페이지 이동">
             <Button
               variant="secondary"
               onClick={() => setPage((p) => p - 1)}
@@ -221,7 +230,7 @@ export default function DoctorReportsPage() {
             >
               이전
             </Button>
-            <span>페이지 {data.page}</span>
+            <span className="pagination__status">페이지 {data.page}</span>
             <Button
               variant="secondary"
               onClick={() => setPage((p) => p + 1)}
@@ -229,8 +238,8 @@ export default function DoctorReportsPage() {
             >
               다음
             </Button>
-          </div>
-        </>
+          </nav>
+        </Card>
       )}
     </AppShell>
   );

@@ -124,7 +124,7 @@ export default function PatientReportDetailPage() {
         <div className="page-stack">
           <PageHeader title="승인된 보고서" />
 
-          <Card>
+          <Card className="report-meta">
             <p>
               상태: <StatusBadge kind="report" status="APPROVED" />
             </p>
@@ -137,13 +137,13 @@ export default function PatientReportDetailPage() {
           </Card>
 
           {report.narrative && (
-            <SectionCard title="승인된 설명">
+            <SectionCard title="승인된 설명" className="narrative-readonly">
               <p>{report.narrative}</p>
             </SectionCard>
           )}
 
           {report.patient_guidance && (
-            <SectionCard title="의료진 안내">
+            <SectionCard title="의료진 안내" className="narrative-readonly">
               <p>{report.patient_guidance}</p>
             </SectionCard>
           )}

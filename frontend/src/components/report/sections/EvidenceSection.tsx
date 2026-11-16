@@ -37,8 +37,9 @@ export default function EvidenceSection({ snapshot, title, emptyBehavior }: Sect
 
   return (
     <SectionShell id="source_record_ids" title={title} hasData={hasData} emptyBehavior={emptyBehavior}>
+      <div className="evidence-groups">
       {hasVitalSigns && (
-        <div>
+        <div className="evidence-group">
           <h3>활력징후</h3>
           <ul>
             {snapshot.vital_signs.map((vital) => (
@@ -58,7 +59,7 @@ export default function EvidenceSection({ snapshot, title, emptyBehavior }: Sect
       )}
 
       {hasLabResults && (
-        <div>
+        <div className="evidence-group">
           <h3>검사결과</h3>
           <ul>
             {snapshot.lab_results.map((lab) => (
@@ -74,7 +75,7 @@ export default function EvidenceSection({ snapshot, title, emptyBehavior }: Sect
       )}
 
       {hasDiagnoses && (
-        <div>
+        <div className="evidence-group">
           <h3>진단</h3>
           <ul>
             {snapshot.diagnoses.map((diagnosis) => (
@@ -85,6 +86,7 @@ export default function EvidenceSection({ snapshot, title, emptyBehavior }: Sect
           </ul>
         </div>
       )}
+      </div>
     </SectionShell>
   );
 }

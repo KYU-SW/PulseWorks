@@ -145,7 +145,7 @@ export default function PatientTimelinePage() {
         </AppHeader>
       }
     >
-      <p>
+      <p className="page-back-link">
         <LinkButton to="/doctor" variant="ghost">
           ← 담당 환자 목록으로 돌아가기
         </LinkButton>
@@ -174,12 +174,12 @@ export default function PatientTimelinePage() {
 
       {state === "success" && data && (
         <div className="page-stack">
-          <Card>
+          <Card className="patient-header">
             <PageHeader
               title={data.patient.name}
               description={`MRN: ${data.patient.mrn} · 생년월일: ${data.patient.birth_date}`}
             />
-            <p>이 화면의 모든 임상 데이터는 합성(가짜) 교육용 데이터입니다.</p>
+            <p className="page-note">이 화면의 모든 임상 데이터는 합성(가짜) 교육용 데이터입니다.</p>
           </Card>
 
           {patientId && <LabTrendSection patientId={patientId} />}
@@ -196,7 +196,7 @@ export default function PatientTimelinePage() {
               return encounterSummaries.length === 0 ? (
                 <EmptyState title="표시할 Encounter 요약이 없습니다." />
               ) : (
-                <ul className="page-stack">
+                <ul className="encounter-summary-list">
                   {encounterSummaries.map((summary) => (
                     <li key={summary.encounterItem.encounter_id}>
                       <EncounterSummaryCard summary={summary} />
@@ -211,34 +211,49 @@ export default function PatientTimelinePage() {
             {data.timeline.length === 0 ? (
               <EmptyState title="표시할 타임라인 항목이 없습니다." />
             ) : (
-              <ul className="page-stack">
+              // 시각/이벤트 종류/제목/세부값/진료과·출처를 열 단위로 정돈한 목록.
+              // 표시하는 값은 기존과 같고, 출처가 없을 때의 "-" 자리표시만 생략한다.
+              <ul className="timeline-list">
                 {data.timeline.map((item) => {
                   const isCreating = creatingEncounterIds.has(item.encounter_id);
+                  const isReportEvent = item.event_type.startsWith("REPORT_");
                   return (
-                    <li key={`${item.event_type}-${item.id}`}>
-                      <Card>
-                        <span>{new Date(item.event_time).toLocaleString()}</span>{" — "}
-                        <strong>{EVENT_TYPE_LABELS[item.event_type]}</strong>{" — "}
-                        <span>{item.title}</span>{" — "}
-                        <span>
-                          {item.event_type === "VITAL_SIGN" &&
-                          item.vital_type &&
-                          item.value &&
-                          item.unit
-                            ? formatVitalSignValue(
-                                item.vital_type as VitalSignType,
-                                item.value,
-                                item.value_secondary ?? null,
-                                item.unit
-                              )
-                            : item.summary}
-                        </span>{" — "}
-                        <span>{item.department}</span>{" — "}
-                        <span>
-                          {item.source_type
-                            ? SOURCE_TYPE_LABELS[item.source_type] ?? item.source_type
-                            : "-"}
-                        </span>
+                    <li
+                      key={`${item.event_type}-${item.id}`}
+                      className={isReportEvent ? "timeline-item timeline-item--report" : "timeline-item"}
+                    >
+                      <time className="timeline-item__time" dateTime={item.event_time}>
+                        {new Date(item.event_time).toLocaleString()}
+                      </time>
+                      <div className="timeline-item__body">
+                        <div className="timeline-item__head">
+                          <strong className="timeline-item__type">{EVENT_TYPE_LABELS[item.event_type]}</strong>
+                          <span className="timeline-item__title">{item.title}</span>
+                        </div>
+                        <div className="timeline-item__detail">
+                          <span>
+                            {item.event_type === "VITAL_SIGN" &&
+                            item.vital_type &&
+                            item.value &&
+                            item.unit
+                              ? formatVitalSignValue(
+                                  item.vital_type as VitalSignType,
+                                  item.value,
+                                  item.value_secondary ?? null,
+                                  item.unit
+                                )
+                              : item.summary}
+                          </span>
+                          {item.event_type === "ENCOUNTER" && item.bmi && (
+                            <span>{" · "}BMI {item.bmi}</span>
+                          )}
+                        </div>
+                        <div className="timeline-item__meta">
+                          <span>{item.department}</span>
+                          {item.source_type && (
+                            <span>{SOURCE_TYPE_LABELS[item.source_type] ?? item.source_type}</span>
+                          )}
+                        </div>
                         {item.event_type === "VITAL_SIGN" &&
                           item.quality_warnings &&
                           item.quality_warnings.length > 0 && (
@@ -246,22 +261,18 @@ export default function PatientTimelinePage() {
                               {item.quality_warnings.join(" ")}
                             </AlertBox>
                           )}
-                        {item.event_type === "ENCOUNTER" && item.bmi && (
-                          <span>{" — "}BMI {item.bmi}</span>
-                        )}
-                        {item.event_type === "ENCOUNTER" && (
-                          <>
-                            {" — "}
-                            <Button
-                              variant="primary"
-                              onClick={() => handleCreateReport(item.encounter_id)}
-                              disabled={isCreating}
-                            >
-                              {isCreating ? "보고서를 생성하는 중..." : "이 방문으로 진료참고 보고서 생성"}
-                            </Button>
-                          </>
-                        )}
-                      </Card>
+                      </div>
+                      {item.event_type === "ENCOUNTER" && (
+                        <div className="timeline-item__action">
+                          <Button
+                            variant="secondary"
+                            onClick={() => handleCreateReport(item.encounter_id)}
+                            disabled={isCreating}
+                          >
+                            {isCreating ? "보고서를 생성하는 중..." : "이 방문으로 진료참고 보고서 생성"}
+                          </Button>
+                        </div>
+                      )}
                     </li>
                   );
                 })}

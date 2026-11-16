@@ -400,7 +400,12 @@ export default function ClinicalReportPreviewPage() {
         </AppHeader>
       }
     >
-      <PageHeader title="진료참고 보고서" />
+      <PageHeader
+        title="진료참고 보고서"
+        actions={
+          state === "success" && report ? <StatusBadge kind="report" status={report.status} /> : undefined
+        }
+      />
 
       {state === "loading" && <LoadingState label="보고서를 불러오는 중..." />}
 
@@ -425,14 +430,14 @@ export default function ClinicalReportPreviewPage() {
 
       {state === "success" && report && (
         <div className="page-stack">
-          <Card>
-            <p>
-              상태: <StatusBadge kind="report" status={report.status} />
-            </p>
-            <p>보고서 생성일: {formatDateTime(report.created_at)}</p>
-            <p>마지막 수정일: {formatDateTime(report.last_modified_at)}</p>
-            <p>보고서 범위: 단일 진료 방문</p>
-            <p>이 보고서의 모든 임상 데이터는 합성(가짜) 교육용 데이터입니다.</p>
+          {/* 보고서 상태 badge는 페이지 헤더 우측에 한 번만 표시한다. */}
+          <Card className="report-meta">
+            <div className="report-meta__list">
+              <p>보고서 생성일: {formatDateTime(report.created_at)}</p>
+              <p>마지막 수정일: {formatDateTime(report.last_modified_at)}</p>
+              <p>보고서 범위: 단일 진료 방문</p>
+            </div>
+            <p className="page-note">이 보고서의 모든 임상 데이터는 합성(가짜) 교육용 데이터입니다.</p>
 
             {report.status === "DRAFT" && (
               <AlertBox variant="info">
@@ -450,7 +455,7 @@ export default function ClinicalReportPreviewPage() {
           </Card>
 
           {canGenerateNarrative && (
-            <Card>
+            <Card className="report-generate">
               <Button
                 variant="primary"
                 onClick={handleGenerateNarrative}
@@ -480,17 +485,17 @@ export default function ClinicalReportPreviewPage() {
           )}
 
           {isEditable && (
-            <SectionCard title="서술형 내용 편집">
+            <SectionCard title="서술형 내용 편집" className="narrative-editor">
               {(() => {
                 const notice = getNarrativeSourceNotice(
                   report.content.narrative_source,
                   report.content.narrative_edited_by_clinician
                 );
                 return (
-                  <>
+                  <div className="narrative-source-notice">
                     <p>{notice.line1}</p>
                     <p>{notice.line2}</p>
-                  </>
+                  </div>
                 );
               })()}
 
@@ -548,32 +553,55 @@ export default function ClinicalReportPreviewPage() {
           )}
 
           {report.status === "APPROVED" && (
-            <SectionCard title="서술형 내용 (읽기 전용)">
+            <SectionCard title="서술형 내용 (읽기 전용)" className="narrative-readonly">
               <p>설명문: {report.content.narrative ?? "(없음)"}</p>
               <p>인수인계 메모: {report.content.handoff_note ?? "(없음)"}</p>
               <p>환자 안내문: {report.content.patient_guidance ?? "(없음)"}</p>
             </SectionCard>
           )}
 
+          {/* 임상 정보와 보고서 근거(ReportRenderer)를 먼저 보여주고, 검토 후
+              결정하는 승인/반려는 페이지 하단의 "검토 및 승인" 영역에 둔다.
+              승인/반려 state machine·handler·API 호출은 그대로다. */}
+          <Card className="report-document">
+            <ReportRenderer content={report.content} />
+          </Card>
+
           {report.status === "DRAFT" && (
-            <Card>
-              {approveStep === "idle" && (
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    setHasReviewedReport(false);
-                    setApproveStep("confirming");
-                  }}
-                  disabled={anyActionInFlight}
-                >
-                  승인
-                </Button>
-              )}
+            <SectionCard title="검토 및 승인" className="review-zone">
+              <p className="review-zone__description">
+                설명문과 근거 데이터를 확인한 뒤 승인하거나 반려합니다.
+              </p>
+
+              <div className="review-zone__actions">
+                {approveStep === "idle" && (
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      setHasReviewedReport(false);
+                      setApproveStep("confirming");
+                    }}
+                    disabled={anyActionInFlight}
+                  >
+                    승인
+                  </Button>
+                )}
+                {rejectStep === "idle" && (
+                  <Button
+                    variant="danger"
+                    onClick={() => setRejectStep("confirming")}
+                    disabled={anyActionInFlight}
+                  >
+                    반려
+                  </Button>
+                )}
+              </div>
+
               {approveStep === "confirming" && (
-                <div role="group" aria-label="승인 확인">
-                  <p>정말 승인하시겠습니까?</p>
-                  <p>이 보고서를 승인하면 환자가 확인할 수 있습니다.</p>
-                  <label>
+                <div role="group" aria-label="승인 확인" className="review-confirm">
+                  <p className="review-confirm__title">정말 승인하시겠습니까?</p>
+                  <p className="page-note">이 보고서를 승인하면 환자가 확인할 수 있습니다.</p>
+                  <label className="review-confirm__attestation">
                     <input
                       type="checkbox"
                       checked={hasReviewedReport}
@@ -581,24 +609,26 @@ export default function ClinicalReportPreviewPage() {
                     />{" "}
                     보고서 내용과 근거 데이터를 직접 확인했습니다.
                   </label>
-                  <Button
-                    variant="primary"
-                    onClick={handleApproveConfirmed}
-                    disabled={isApproving || !hasReviewedReport}
-                    loading={isApproving}
-                  >
-                    {isApproving ? "승인하는 중..." : "승인 확정"}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setApproveStep("idle");
-                      setHasReviewedReport(false);
-                    }}
-                    disabled={isApproving}
-                  >
-                    취소
-                  </Button>
+                  <div className="review-confirm__actions">
+                    <Button
+                      variant="primary"
+                      onClick={handleApproveConfirmed}
+                      disabled={isApproving || !hasReviewedReport}
+                      loading={isApproving}
+                    >
+                      {isApproving ? "승인하는 중..." : "승인 확정"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setApproveStep("idle");
+                        setHasReviewedReport(false);
+                      }}
+                      disabled={isApproving}
+                    >
+                      취소
+                    </Button>
+                  </div>
                 </div>
               )}
               {approveError && (
@@ -607,33 +637,26 @@ export default function ClinicalReportPreviewPage() {
                 </AlertBox>
               )}
 
-              {rejectStep === "idle" && (
-                <Button
-                  variant="danger"
-                  onClick={() => setRejectStep("confirming")}
-                  disabled={anyActionInFlight}
-                >
-                  반려
-                </Button>
-              )}
               {rejectStep === "confirming" && (
-                <div role="group" aria-label="반려 확인">
-                  <p>정말 반려하시겠습니까?</p>
-                  <Button
-                    variant="danger"
-                    onClick={handleRejectConfirmed}
-                    disabled={isRejecting}
-                    loading={isRejecting}
-                  >
-                    {isRejecting ? "반려하는 중..." : "반려 확정"}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setRejectStep("idle")}
-                    disabled={isRejecting}
-                  >
-                    취소
-                  </Button>
+                <div role="group" aria-label="반려 확인" className="review-confirm">
+                  <p className="review-confirm__title">정말 반려하시겠습니까?</p>
+                  <div className="review-confirm__actions">
+                    <Button
+                      variant="danger"
+                      onClick={handleRejectConfirmed}
+                      disabled={isRejecting}
+                      loading={isRejecting}
+                    >
+                      {isRejecting ? "반려하는 중..." : "반려 확정"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setRejectStep("idle")}
+                      disabled={isRejecting}
+                    >
+                      취소
+                    </Button>
+                  </div>
                 </div>
               )}
               {rejectError && (
@@ -641,23 +664,17 @@ export default function ClinicalReportPreviewPage() {
                   {rejectError}
                 </AlertBox>
               )}
-            </Card>
+            </SectionCard>
           )}
 
-          <Card>
-            <ReportRenderer content={report.content} />
-          </Card>
-
-          <p>
+          <div className="page-footer-links">
             <LinkButton to={`/doctor/patients/${report.patient_id}`} variant="ghost">
               환자 타임라인으로 돌아가기
             </LinkButton>
-          </p>
-          <p>
             <LinkButton to="/doctor" variant="ghost">
               담당 환자 목록으로 돌아가기
             </LinkButton>
-          </p>
+          </div>
         </div>
       )}
     </AppShell>

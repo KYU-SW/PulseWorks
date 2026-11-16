@@ -29,7 +29,7 @@ export default function SectionShell({
   const headingId = `${id}-heading`;
 
   return (
-    <section aria-labelledby={headingId}>
+    <section aria-labelledby={headingId} className={`report-section report-section--${id}`}>
       <h2 id={headingId}>{title}</h2>
       {hasData ? children : <p>{emptyText}</p>}
     </section>

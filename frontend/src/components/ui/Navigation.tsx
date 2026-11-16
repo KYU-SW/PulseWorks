@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import { Role } from "../../auth/AuthContext";
 
 type NavLink = { to: string; label: string };
@@ -29,9 +29,12 @@ export default function Navigation({ role, onLogout }: NavigationProps) {
       <ul className="app-navigation__list">
         {links.map((link) => (
           <li key={link.to}>
-            <Link className="app-navigation__link" to={link.to}>
+            {/* NavLink는 현재 경로에 aria-current="page"를 붙인다 — 활성 메뉴를
+                색만이 아니라 보조기술에도 전달한다. end: 상위 경로("/doctor")가
+                하위 경로("/doctor/reports")에서 함께 활성화되지 않게 한다. */}
+            <NavLink className="app-navigation__link" to={link.to} end>
               {link.label}
-            </Link>
+            </NavLink>
           </li>
         ))}
       </ul>

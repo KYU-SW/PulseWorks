@@ -25,18 +25,22 @@ export default function LabResultsTableSection({
 
   return (
     <SectionShell id="lab_results" title={title} hasData={hasData} emptyBehavior={emptyBehavior}>
-      <label>
-        <input
-          type="checkbox"
-          checked={showOutOfRangeOnly}
-          onChange={(e) => setShowOutOfRangeOnly(e.target.checked)}
-        />{" "}
-        참고범위 밖만 보기
-      </label>
+      {/* 필터를 표 바로 위의 section toolbar로 묶는다(동작은 그대로). */}
+      <div className="lab-toolbar">
+        <label className="toggle-chip">
+          <input
+            type="checkbox"
+            checked={showOutOfRangeOnly}
+            onChange={(e) => setShowOutOfRangeOnly(e.target.checked)}
+          />{" "}
+          참고범위 밖만 보기
+        </label>
+      </div>
 
       {visibleLabResults.length === 0 ? (
-        <p>참고범위를 벗어난 검사결과가 없습니다.</p>
+        <p className="page-note">참고범위를 벗어난 검사결과가 없습니다.</p>
       ) : (
+        <div className="lab-table-frame">
         <table>
           <thead>
             <tr>
@@ -50,16 +54,16 @@ export default function LabResultsTableSection({
           <tbody>
             {visibleLabResults.map((lab) => (
               <tr key={lab.id}>
-                <td>{lab.test_name}</td>
-                <td>
+                <td className="cell-primary">{lab.test_name}</td>
+                <td className="cell-numeric cell-primary">
                   {lab.value}
                   {lab.unit}
                 </td>
-                <td>
+                <td className="cell-numeric cell-muted">
                   {lab.reference_low}-{lab.reference_high}
                   {lab.unit}
                 </td>
-                <td>{formatDateTime(lab.measured_at)}</td>
+                <td className="cell-nowrap cell-muted">{formatDateTime(lab.measured_at)}</td>
                 <td>
                   <StatusBadge kind="lab" status={lab.status} />
                 </td>
@@ -67,6 +71,7 @@ export default function LabResultsTableSection({
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </SectionShell>
   );
