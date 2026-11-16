@@ -6,7 +6,13 @@ export type TimelineEventType =
   | "LAB_RESULT"
   | "PRESCRIPTION"
   | "CLINICAL_NOTE"
-  | "VITAL_SIGN"; // Task F4-A
+  | "VITAL_SIGN" // Task F4-A
+  // UX-2C: ClinicalReport lifecycle event — narrative/content는 절대
+  // 포함하지 않는다.
+  | "REPORT_CREATED"
+  | "REPORT_UPDATED"
+  | "REPORT_APPROVED"
+  | "REPORT_REJECTED";
 
 export type TimelinePatient = {
   id: number;

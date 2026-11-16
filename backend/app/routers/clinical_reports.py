@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -13,11 +13,14 @@ from app.models import (
     ClinicalReportType,
     Encounter,
     Patient,
+    PatientAssignment,
     Role,
     User,
 )
 from app.schemas.clinical_report import (
     ClinicalReportCreate,
+    ClinicalReportListItem,
+    ClinicalReportListOut,
     ClinicalReportOut,
     ClinicalReportPatch,
     EmrSnapshot,
@@ -169,6 +172,82 @@ def create_clinical_report(
         raise HTTPException(status_code=500, detail="보고서 생성 중 오류가 발생했습니다.")
 
     return _to_clinical_report_out(report)
+
+
+@reports_router.get("", response_model=ClinicalReportListOut)
+def list_clinical_reports(
+    status: ClinicalReportStatus | None = Query(default=None),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.DOCTOR)),
+):
+    """DOCTOR 본인이 현재 담당(PatientAssignment)하고 있는 환자의
+    ClinicalReport만 목록으로 반환한다. can_access_patient()를 결과마다
+    Python에서 다시 호출하는 N+1 패턴을 쓰지 않고, PatientAssignment에
+    대한 서브쿼리로 ClinicalReport 조회 자체의 범위를 DB 단에서 제한한다
+    (이 라우터의 다른 엔드포인트처럼 report 단위 can_access_patient()
+    호출은 여기서는 필요 없다 — 목록 자체가 이미 배정된 환자로만
+    좁혀진다).
+
+    기간 필터는 승인일이 아니라 created_at(보고서가 실제로 생성된 시각)
+    기준이다 — 승인 전 DRAFT도 생성일을 가지므로, 필터 미지정 시
+    "현재 접근 가능한 report 전체"가 DRAFT/APPROVED/REJECTED 구분 없이
+    모두 나온다.
+
+    정렬은 created_at DESC, 동일 시각이면 id DESC로 결정적으로 고정한다.
+    content/narrative/emr_snapshot은 절대 포함하지 않는다 — 상세는
+    GET /reports/{report_id}가 전담한다.
+    """
+    assigned_patient_ids = db.query(PatientAssignment.patient_id).filter(
+        PatientAssignment.staff_user_id == user.id
+    )
+
+    query = (
+        db.query(ClinicalReport, Patient)
+        .join(Patient, Patient.id == ClinicalReport.patient_id)
+        .filter(ClinicalReport.patient_id.in_(assigned_patient_ids))
+    )
+
+    if status is not None:
+        query = query.filter(ClinicalReport.status == status)
+    if from_date is not None:
+        query = query.filter(
+            ClinicalReport.created_at >= datetime.combine(from_date, time.min, tzinfo=timezone.utc)
+        )
+    if to_date is not None:
+        exclusive_upper_bound = datetime.combine(
+            to_date + timedelta(days=1), time.min, tzinfo=timezone.utc
+        )
+        query = query.filter(ClinicalReport.created_at < exclusive_upper_bound)
+
+    total = query.count()
+    rows = (
+        query.order_by(ClinicalReport.created_at.desc(), ClinicalReport.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    items = [
+        ClinicalReportListItem(
+            id=report.id,
+            patient_id=report.patient_id,
+            patient_name=patient.full_name,
+            patient_mrn=patient.mrn,
+            encounter_id=report.encounter_id,
+            report_type=report.report_type.value,
+            scope_type=report.scope_type.value,
+            status=report.status.value,
+            created_at=report.created_at,
+            reviewed_at=report.reviewed_at,
+        )
+        for report, patient in rows
+    ]
+
+    return ClinicalReportListOut(items=items, total=total, page=page, page_size=page_size)
 
 
 @reports_router.get("/{report_id}", response_model=ClinicalReportOut)

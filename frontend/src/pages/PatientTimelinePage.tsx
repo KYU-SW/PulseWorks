@@ -38,6 +38,11 @@ const EVENT_TYPE_LABELS: Record<TimelineEventType, string> = {
   PRESCRIPTION: "처방",
   CLINICAL_NOTE: "진료기록",
   VITAL_SIGN: "활력징후", // Task F4-A
+  // UX-2C
+  REPORT_CREATED: "진료 보고서 생성",
+  REPORT_UPDATED: "진료 보고서 수정",
+  REPORT_APPROVED: "진료 보고서 승인",
+  REPORT_REJECTED: "진료 보고서 반려",
 };
 
 const SOURCE_TYPE_LABELS: Record<string, string> = {

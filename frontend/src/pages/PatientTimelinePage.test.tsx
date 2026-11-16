@@ -601,4 +601,61 @@ describe("PatientTimelinePage", () => {
       screen.getByRole("button", { name: "이 방문으로 진료참고 보고서 생성" })
     ).toBeInTheDocument();
   });
+
+  // ==================== UX-2C: Report Lifecycle Timeline ====================
+
+  const TIMELINE_WITH_REPORT_EVENTS = {
+    patient: SAMPLE_TIMELINE.patient,
+    timeline: [
+      ...SAMPLE_TIMELINE.timeline,
+      {
+        id: 100,
+        encounter_id: 1,
+        event_type: "REPORT_CREATED",
+        event_time: "2026-03-11T09:00:00+00:00",
+        title: "진료 보고서 생성",
+        summary: "보고서 초안이 생성되었습니다.",
+        source_type: null,
+        department: "내분비내과",
+      },
+      {
+        id: 100,
+        encounter_id: 1,
+        event_type: "REPORT_APPROVED",
+        event_time: "2026-03-12T09:00:00+00:00",
+        title: "진료 보고서 승인",
+        summary: "검토가 완료되어 승인되었습니다.",
+        source_type: null,
+        department: "내분비내과",
+      },
+    ],
+  };
+
+  it("renders report lifecycle events with user-friendly Korean labels", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRouter({ "/timeline": { status: 200, body: TIMELINE_WITH_REPORT_EVENTS } })
+    );
+    renderTimelinePage();
+
+    await screen.findByText("합성환자-내분비01");
+    const flatTimeline = within(screen.getByRole("region", { name: "임상 타임라인" }));
+    expect(flatTimeline.getAllByText("진료 보고서 생성").length).toBeGreaterThan(0);
+    expect(flatTimeline.getAllByText("진료 보고서 승인").length).toBeGreaterThan(0);
+  });
+
+  it("does not display the internal numeric report id as visible text", async () => {
+    setStoredToken(makeFakeJwt("DOCTOR"));
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRouter({ "/timeline": { status: 200, body: TIMELINE_WITH_REPORT_EVENTS } })
+    );
+    renderTimelinePage();
+
+    await screen.findByText("합성환자-내분비01");
+    const flatTimeline = within(screen.getByRole("region", { name: "임상 타임라인" }));
+    expect(flatTimeline.queryByText("100")).not.toBeInTheDocument();
+    expect(flatTimeline.queryByText(/#100/)).not.toBeInTheDocument();
+  });
 });

@@ -3,7 +3,10 @@ import { Role } from "../../auth/AuthContext";
 
 type NavLink = { to: string; label: string };
 
-const DOCTOR_LINKS: NavLink[] = [{ to: "/doctor", label: "대시보드" }];
+const DOCTOR_LINKS: NavLink[] = [
+  { to: "/doctor", label: "대시보드" },
+  { to: "/doctor/reports", label: "진료 보고서" },
+];
 const PATIENT_LINKS: NavLink[] = [
   { to: "/patient", label: "포털" },
   { to: "/patient/reports", label: "승인된 보고서" },

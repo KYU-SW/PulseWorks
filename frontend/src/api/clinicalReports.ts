@@ -3,6 +3,49 @@
 
 import { apiGet, apiPatch, apiPost } from "./client";
 
+// UX-2A: 목록 응답은 content/narrative/emr_snapshot을 포함하지 않는
+// 경량 항목이다 — 상세 조회는 여전히 getClinicalReport()가 전담한다.
+export type ClinicalReportListItem = {
+  id: number;
+  patient_id: number;
+  patient_name: string;
+  patient_mrn: string;
+  encounter_id: number | null;
+  report_type: string;
+  scope_type: string;
+  status: string;
+  created_at: string;
+  reviewed_at: string | null;
+};
+
+export type ClinicalReportListResponse = {
+  items: ClinicalReportListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type ClinicalReportListParams = {
+  status?: "DRAFT" | "APPROVED" | "REJECTED";
+  from_date?: string;
+  to_date?: string;
+  page?: number;
+  page_size?: number;
+};
+
+export function listClinicalReports(
+  params: ClinicalReportListParams = {}
+): Promise<ClinicalReportListResponse> {
+  const query = new URLSearchParams();
+  if (params.status) query.set("status", params.status);
+  if (params.from_date) query.set("from_date", params.from_date);
+  if (params.to_date) query.set("to_date", params.to_date);
+  if (params.page !== undefined) query.set("page", String(params.page));
+  if (params.page_size !== undefined) query.set("page_size", String(params.page_size));
+  const queryString = query.toString();
+  return apiGet<ClinicalReportListResponse>(`/reports${queryString ? `?${queryString}` : ""}`);
+}
+
 export type SnapshotPatient = {
   id: number;
   mrn: string;

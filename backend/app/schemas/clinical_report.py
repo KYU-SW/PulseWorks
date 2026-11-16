@@ -247,6 +247,30 @@ class ClinicalReportPatch(BaseModel):
         return self
 
 
+class ClinicalReportListItem(BaseModel):
+    """UX-2A: 목록 화면에 필요한 최소 정보만 담는 경량 스키마 —
+    content/emr_snapshot/narrative는 절대 포함하지 않는다(상세 조회는
+    여전히 GET /reports/{id}가 전담한다)."""
+
+    id: int
+    patient_id: int
+    patient_name: str
+    patient_mrn: str
+    encounter_id: int | None
+    report_type: str
+    scope_type: str
+    status: str
+    created_at: datetime
+    reviewed_at: datetime | None
+
+
+class ClinicalReportListOut(BaseModel):
+    items: list[ClinicalReportListItem]
+    total: int
+    page: int
+    page_size: int
+
+
 class ClinicalReportOut(BaseModel):
     id: int
     patient_id: int
